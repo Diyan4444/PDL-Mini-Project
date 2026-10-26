@@ -1,26 +1,41 @@
 import os
 import uuid
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple, Union
+import numpy as np
 from PIL import Image
 import imagehash
 from modules.database import get_all_diagram_groups, add_diagram_group
 
 
-def compute_image_phash(image_path: str) -> Optional[str]:
-    """Computes a 64-bit Perceptual Hash (pHash) string for the given image file.
+def compute_image_phash(image_input: Union[str, np.ndarray, Image.Image]) -> Optional[str]:
+    """Computes a 64-bit Perceptual Hash (pHash) string for the given image.
     
+    Accepts a file path string, a numpy BGR/RGB array, or a PIL Image instance.
     Returns hex string representation or None if image cannot be parsed.
     """
-    if not os.path.exists(image_path):
+    if image_input is None:
         return None
     try:
-        with Image.open(image_path) as img:
-            # Convert to RGB to handle alpha channels and palette images cleanly
-            img_rgb = img.convert("RGB")
-            h = imagehash.phash(img_rgb)
-            return str(h)
-    except Exception:
+        if isinstance(image_input, str):
+            if not os.path.exists(image_input):
+                return None
+            with Image.open(image_input) as img:
+                return str(imagehash.phash(img.convert("RGB")))
+        elif isinstance(image_input, np.ndarray):
+            if image_input.size == 0:
+                return None
+            # If 3 channels (BGR from OpenCV), convert to RGB
+            if len(image_input.shape) == 3 and image_input.shape[2] == 3:
+                rgb = cv2.cvtColor(image_input, cv2.COLOR_BGR2RGB) if 'cv2' in globals() else image_input[:, :, ::-1]
+                pil_img = Image.fromarray(rgb)
+            else:
+                pil_img = Image.fromarray(image_input)
+            return str(imagehash.phash(pil_img.convert("RGB")))
+        elif isinstance(image_input, Image.Image):
+            return str(imagehash.phash(image_input.convert("RGB")))
+    except Exception as e:
         return None
+    return None
 
 
 def calculate_hamming_distance(hash1_str: str, hash2_str: str) -> int:

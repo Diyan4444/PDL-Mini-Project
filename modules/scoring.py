@@ -68,15 +68,15 @@ def calculate_cluster_predictions(
     for c_id, members in clusters.items():
         years_appeared = [m["year"] for m in members]
         distinct_years_appeared = sorted(list(set(years_appeared)))
-        total_appearances = len(years_appeared)
+        total_appearances = len(distinct_years_appeared)
 
-        # 1. Frequency Score (F_hat): appearances / total historical years examined
+        # 1. Frequency Score (F_hat): distinct year appearances / total historical years examined
         f_hat = min(1.0, total_appearances / n_years)
 
         # 2. Recency Score (R_hat): exponential decay weight lambda = 0.3
-        # R = sum(exp(-0.3 * (current_year - y)))
+        # R = sum(exp(-0.3 * (current_year - y))) over distinct years
         lambda_decay = 0.3
-        recency_sum = sum(math.exp(-lambda_decay * max(0, current_year - y)) for y in years_appeared)
+        recency_sum = sum(math.exp(-lambda_decay * max(0, current_year - y)) for y in distinct_years_appeared)
         # Normalize: theoretical max is if it appeared every year
         max_possible_recency = sum(math.exp(-lambda_decay * max(0, current_year - y)) for y in distinct_years) or 1.0
         r_hat = min(1.0, recency_sum / max_possible_recency)

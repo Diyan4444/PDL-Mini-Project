@@ -14,17 +14,40 @@ def load_quiz_questions(
     units: Optional[List[int]] = None,
     text_only: bool = False,
     limit: int = 15,
+    require_verified: bool = True,
 ) -> List[Dict[str, Any]]:
-    """Loads and formats questions for a student quiz based on selected filters."""
+    """Loads and formats questions for a student quiz based on selected filters.
+    
+    Filters to verified MCQs by default, falling back gracefully to available MCQs
+    if none have been verified yet.
+    """
     with get_db_connection() as conn:
         cursor = conn.cursor()
-        query = """
+        
+        # Check count of verified MCQs first
+        cursor.execute(
+            """
+            SELECT COUNT(*) FROM mcq_bank m
+            JOIN questions q ON m.question_id = q.id
+            JOIN papers p ON q.paper_id = p.id
+            WHERE p.subject_id = ? AND m.status = 'verified';
+            """,
+            (subject_id,),
+        )
+        verified_count = cursor.fetchone()[0]
+
+        # Use verified filter if available or required
+        status_filter = "AND m.status = 'verified'" if (verified_count > 0 and require_verified) else ""
+
+        query = f"""
             SELECT 
                 q.id, q.question_number, q.question_text, q.content_type, 
-                q.image_path, q.marks, q.unit, q.topic, p.year, p.exam_type
-            FROM questions q
+                q.image_path, q.marks, q.unit, q.topic, p.year, p.exam_type,
+                m.option_a, m.option_b, m.option_c, m.option_d, m.correct_option, m.explanation
+            FROM mcq_bank m
+            JOIN questions q ON m.question_id = q.id
             JOIN papers p ON q.paper_id = p.id
-            WHERE p.subject_id = ?
+            WHERE p.subject_id = ? {status_filter}
         """
         params = [subject_id]
 
@@ -49,18 +72,6 @@ def load_quiz_questions(
     quiz_items = []
     for row in rows:
         q_id = row["id"]
-        mcq = get_mcq_by_question_id(q_id)
-        if not mcq:
-            # Fallback algorithmic generation
-            mcq = {
-                "option_a": f"Core analytical principle of {row['topic']}",
-                "option_b": "Secondary implementation exception rule",
-                "option_c": "Inverse relation under standard operating conditions",
-                "option_d": "Both core principle and secondary rule are valid",
-                "correct_option": "A",
-                "explanation": f"Official reference answer for historical examination question {row['question_number']}.",
-            }
-
         quiz_items.append({
             "question_id": q_id,
             "question_number": row["question_number"],
@@ -73,14 +84,72 @@ def load_quiz_questions(
             "year": row["year"],
             "exam_type": row["exam_type"],
             "options": {
-                "A": mcq["option_a"],
-                "B": mcq["option_b"],
-                "C": mcq["option_c"],
-                "D": mcq["option_d"],
+                "A": row["option_a"],
+                "B": row["option_b"],
+                "C": row["option_c"],
+                "D": row["option_d"],
                 "E": "🚫 Not in my syllabus / Skip",
             },
-            "correct_option": mcq["correct_option"],
-            "explanation": mcq["explanation"],
+            "correct_option": row["correct_option"],
+            "explanation": row["explanation"],
+        })
+
+    return quiz_items
+
+
+def load_remedial_quiz_questions(
+    subject_id: int,
+    weak_topics: List[str],
+    limit: int = 10,
+) -> List[Dict[str, Any]]:
+    """Loads remedial quiz questions strictly reusing stored MCQs matching the weak topics."""
+    if not weak_topics:
+        return load_quiz_questions(subject_id, limit=limit)
+
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        placeholders = ",".join(["?"] * len(weak_topics))
+        query = f"""
+            SELECT 
+                q.id, q.question_number, q.question_text, q.content_type, 
+                q.image_path, q.marks, q.unit, q.topic, p.year, p.exam_type,
+                m.option_a, m.option_b, m.option_c, m.option_d, m.correct_option, m.explanation
+            FROM mcq_bank m
+            JOIN questions q ON m.question_id = q.id
+            JOIN papers p ON q.paper_id = p.id
+            WHERE p.subject_id = ? AND q.topic IN ({placeholders})
+            ORDER BY q.marks DESC LIMIT ?;
+        """
+        params = [subject_id] + weak_topics + [limit]
+        cursor.execute(query, tuple(params))
+        rows = [dict(r) for r in cursor.fetchall()]
+
+    if not rows:
+        # Fallback to general quiz questions
+        return load_quiz_questions(subject_id, limit=limit)
+
+    quiz_items = []
+    for row in rows:
+        quiz_items.append({
+            "question_id": row["id"],
+            "question_number": row["question_number"],
+            "question_text": row["question_text"],
+            "content_type": row["content_type"],
+            "image_path": row["image_path"],
+            "marks": row["marks"],
+            "unit": row["unit"],
+            "topic": row["topic"],
+            "year": row["year"],
+            "exam_type": row["exam_type"],
+            "options": {
+                "A": row["option_a"],
+                "B": row["option_b"],
+                "C": row["option_c"],
+                "D": row["option_d"],
+                "E": "🚫 Not in my syllabus / Skip",
+            },
+            "correct_option": row["correct_option"],
+            "explanation": row["explanation"],
         })
 
     return quiz_items
@@ -114,7 +183,7 @@ def submit_quiz_attempt(
     with get_db_connection() as conn:
         cursor = conn.cursor()
         
-        # Calculate score first
+        # Calculate score
         for idx, q in enumerate(questions):
             ans = responses.get(idx, {})
             selected = ans.get("selected_option")

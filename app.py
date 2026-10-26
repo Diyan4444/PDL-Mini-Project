@@ -5,12 +5,17 @@ import streamlit as st
 import pandas as pd
 
 from modules.database import (
+    get_db_connection,
     init_db,
     get_all_subjects,
     add_subject,
+    update_subject,
     delete_subject,
     delete_paper,
+    update_paper_details,
+    get_paper_details,
     get_all_papers_detailed,
+    get_questions_by_paper,
     get_all_tags,
     add_tag,
     merge_tags,
@@ -21,6 +26,9 @@ from modules.database import (
     update_question_tags,
     export_database_json,
     log_action,
+    verify_mcq,
+    get_mcqs_for_subject,
+    cleanup_orphaned_records,
 )
 from modules.auth import (
     render_login_widget,
@@ -28,7 +36,7 @@ from modules.auth import (
     is_admin,
     get_current_user_email,
 )
-from modules.ingestion import process_pdf_document, download_drive_file
+from modules.ingestion import process_pdf_document, download_drive_file, ingest_combined_pdf
 from modules.scoring import calculate_cluster_predictions
 from modules.quiz_engine import (
     load_quiz_questions,
@@ -54,10 +62,12 @@ init_db()
 # 2. Inject Custom CSS for Glowing Green/Black Toggle Tags and Badges
 CUSTOM_CSS = """
 <style>
-/* Glowing Green Active Tag Buttons */
+/* Glowing Green Active Tag Buttons with st-key selectors */
+div[class*="st-key-tag_act_"] button,
+div[class*="st-key-btn_tag_active"] button,
 div.stButton > button.tag-btn-active {
     background-color: #28a745 !important;
-    color: #000000 !important;
+    color: #ffffff !important;
     font-weight: 700 !important;
     border: 2px solid #1e7e34 !important;
     box-shadow: 0 0 12px rgba(40, 167, 69, 0.8) !important;
@@ -65,6 +75,8 @@ div.stButton > button.tag-btn-active {
     transition: all 0.2s ease-in-out !important;
 }
 
+div[class*="st-key-tag_inact_"] button,
+div[class*="st-key-btn_tag_inactive"] button,
 div.stButton > button.tag-btn-inactive {
     background-color: #f8f9fa !important;
     color: #495057 !important;
@@ -73,6 +85,7 @@ div.stButton > button.tag-btn-inactive {
     border-radius: 20px !important;
 }
 
+div[class*="st-key-tag_inact_"] button:hover,
 div.stButton > button.tag-btn-inactive:hover {
     border-color: #28a745 !important;
     color: #28a745 !important;
@@ -626,9 +639,11 @@ elif selected_page == "🛡️ Admin Management Portal":
     st.title("🛡️ Administrator Management Portal")
     render_disclaimer()
 
-    tab_ingest, tab_review, tab_tags, tab_manage, tab_db = st.tabs([
+    tab_ingest, tab_review, tab_mcqs, tab_edit, tab_tags, tab_manage, tab_db = st.tabs([
         "📥 Ingest Question Papers",
         "🔍 Low-Confidence Review Queue",
+        "📝 MCQ Bank Verification",
+        "✏️ Edit Subjects, Papers & Questions",
         "🏷️ Tag & Syllabus Manager",
         "🗑️ Manage / Delete Papers & Subjects",
         "💾 System Maintenance & DB",
@@ -636,76 +651,140 @@ elif selected_page == "🛡️ Admin Management Portal":
 
     # SUB-TAB 1: INGESTION PIPELINE
     with tab_ingest:
-        st.subheader("Ingest Question Paper (PDF)")
+        st.subheader("Ingest Question Papers")
+
+        ingest_mode = st.radio(
+            "Ingestion Workflow",
+            ["Combined PDF (auto-detect papers)", "Manual override (single paper)"],
+            horizontal=True,
+            key="rad_ingest_mode",
+        )
 
         subjects = get_all_subjects()
         subject_names = [s["name"] for s in subjects]
-        
-        with st.expander("➕ Register New Subject / Branch", expanded=False):
-            new_s_name = st.text_input("Subject Name (e.g. Compiler Design)")
-            new_s_code = st.text_input("Subject Code (e.g. CS601)")
-            if st.button("Add Subject", key="btn_add_subj"):
-                if new_s_name.strip():
-                    add_subject(new_s_name.strip(), new_s_code.strip())
-                    st.success(f"Added subject '{new_s_name}'.")
-                    st.rerun()
+        actor = get_current_user_email() or "diyanshah2301@gmail.com"
 
-        if not subjects:
-            st.warning("Please add at least one subject above before uploading papers.")
+        if ingest_mode == "Combined PDF (auto-detect papers)":
+            st.markdown("#### 📑 Combined PDF Intake & Auto-Segregation")
+            st.caption("Upload a combined PDF containing one or multiple exam papers (up to 150 pages / 100 MB). The engine will automatically deskew, remove shadows, isolate papers, extract metadata, and parse questions.")
+
+            uploaded_combined = st.file_uploader(
+                "Upload Combined Exam PDF",
+                type=["pdf"],
+                key="uploader_combined_pdf",
+                help="Max 150 pages and 100 MB. Supports camera scans and clean digital PDFs.",
+            )
+
+            if uploaded_combined:
+                comb_bytes = uploaded_combined.read()
+                st.info(f"Loaded: **{uploaded_combined.name}** ({round(len(comb_bytes)/(1024*1024), 2)} MB)")
+
+                if st.button("🚀 Run Auto-Segregation & Ingestion", type="primary", key="btn_run_autoseg"):
+                    progress_bar = st.progress(0, text="Initializing auto-segregation pipeline...")
+                    
+                    def on_progress(curr, total, msg):
+                        progress_bar.progress(int((curr / total) * 100), text=msg)
+
+                    with st.spinner("Processing document: Deskewing, illumination flattening, boundary detection & OCR..."):
+                        success, msg, summary = ingest_combined_pdf(
+                            file_bytes=comb_bytes,
+                            original_filename=uploaded_combined.name,
+                            actor_email=actor,
+                            progress_callback=on_progress,
+                        )
+
+                    progress_bar.progress(100, text="Complete!")
+                    if success:
+                        st.success(msg)
+                        st.markdown("### 📋 Detected Examination Papers")
+                        
+                        for p in summary:
+                            with st.container():
+                                c_th, c_info = st.columns([1, 3])
+                                with c_th:
+                                    if p.get("thumbnail_path") and os.path.exists(p["thumbnail_path"]):
+                                        st.image(p["thumbnail_path"], caption=f"Pages {p['page_range']}", use_container_width=True)
+                                with c_info:
+                                    conf_val = p.get("metadata_confidence", 0.0)
+                                    badge_color = "green" if conf_val >= 0.85 else "orange"
+                                    st.markdown(f"#### {p.get('subject_name', 'Unknown Course')} (Paper ID #{p.get('paper_id')})")
+                                    st.markdown(
+                                        f"**Pages:** `{p['page_range']}` | "
+                                        f"**Confidence:** :{badge_color}[{int(conf_val*100)}%] | "
+                                        f"**Quality Score:** `{p.get('quality_score', 0.0)}` | "
+                                        f"**Status:** `{p.get('status', 'accepted')}`"
+                                    )
+                                    st.markdown(f"**Extracted Questions:** `{p.get('questions_count', 0)}` questions committed.")
+                                st.divider()
+                    else:
+                        st.error(msg)
+
         else:
-            c1, c2, c3, c4 = st.columns(4)
-            with c1:
-                sel_subj_name = st.selectbox("Subject", subject_names, key="ingest_subj")
-                sel_subj_id = next(s["id"] for s in subjects if s["name"] == sel_subj_name)
-            with c2:
-                in_year = st.number_input("Year of Exam", min_value=2015, max_value=2030, value=2024)
-            with c3:
-                in_sem = st.number_input("Semester", min_value=1, max_value=8, value=6)
-            with c4:
-                in_type = st.selectbox("Exam Type", ["midterm", "endterm"])
+            st.markdown("#### ✍️ Manual Single Paper Intake")
+            with st.expander("➕ Register New Subject / Branch", expanded=False):
+                new_s_name = st.text_input("Subject Name (e.g. Compiler Design)")
+                new_s_code = st.text_input("Subject Code (e.g. CS601)")
+                if st.button("Add Subject", key="btn_add_subj"):
+                    if new_s_name.strip():
+                        add_subject(new_s_name.strip(), new_s_code.strip())
+                        st.success(f"Added subject '{new_s_name}'.")
+                        st.rerun()
 
-            intake_mode = st.radio("Intake Method", ["Local PDF Upload", "Public Google Drive Link"])
-
-            pdf_bytes = None
-            orig_filename = ""
-
-            if intake_mode == "Local PDF Upload":
-                uploaded_file = st.file_uploader("Upload Question Paper PDF", type=["pdf"])
-                if uploaded_file:
-                    pdf_bytes = uploaded_file.read()
-                    orig_filename = uploaded_file.name
+            if not subjects:
+                st.warning("Please add at least one subject above before uploading papers.")
             else:
-                drive_url = st.text_input("Public Google Drive Link (with view permission)")
-                if st.button("Fetch from Drive"):
-                    if drive_url:
-                        with st.spinner("Downloading from Drive via gdown..."):
-                            temp_dl = os.path.join("data", "temp_drive_paper.pdf")
-                            ok = download_drive_file(drive_url, temp_dl)
-                            if ok:
-                                with open(temp_dl, "rb") as f:
-                                    pdf_bytes = f.read()
-                                orig_filename = "drive_downloaded_paper.pdf"
-                                st.success("Document downloaded from Google Drive.")
-                            else:
-                                st.error("Failed to download from Drive. Verify that link is public.")
+                c1, c2, c3, c4 = st.columns(4)
+                with c1:
+                    sel_subj_name = st.selectbox("Subject", subject_names, key="ingest_subj")
+                    sel_subj_id = next(s["id"] for s in subjects if s["name"] == sel_subj_name)
+                with c2:
+                    in_year = st.number_input("Year of Exam", min_value=2015, max_value=2030, value=2024)
+                with c3:
+                    in_sem = st.number_input("Semester", min_value=1, max_value=8, value=6)
+                with c4:
+                    in_type = st.selectbox("Exam Type", ["midterm", "endterm"])
 
-            if pdf_bytes and st.button("⚡ Run Extraction & Ingestion Pipeline", type="primary"):
-                with st.spinner("Executing extraction, OCR check, diagram clustering, and heuristic scoring..."):
-                    actor = get_current_user_email() or "diyanshah2301@gmail.com"
-                    success, msg, summary = process_pdf_document(
-                        file_bytes=pdf_bytes,
-                        original_filename=orig_filename,
-                        subject_id=sel_subj_id,
-                        year=int(in_year),
-                        semester=int(in_sem),
-                        exam_type=in_type,
-                        actor_email=actor,
-                    )
-                if success:
-                    st.success(msg)
-                    st.json(summary)
+                intake_mode = st.radio("Intake Method", ["Local PDF Upload", "Public Google Drive Link"])
+
+                pdf_bytes = None
+                orig_filename = ""
+
+                if intake_mode == "Local PDF Upload":
+                    uploaded_file = st.file_uploader("Upload Question Paper PDF", type=["pdf"])
+                    if uploaded_file:
+                        pdf_bytes = uploaded_file.read()
+                        orig_filename = uploaded_file.name
                 else:
-                    st.error(msg)
+                    drive_url = st.text_input("Public Google Drive Link (with view permission)")
+                    if st.button("Fetch from Drive"):
+                        if drive_url:
+                            with st.spinner("Downloading from Drive via gdown..."):
+                                temp_dl = os.path.join("data", "temp_drive_paper.pdf")
+                                ok = download_drive_file(drive_url, temp_dl)
+                                if ok:
+                                    with open(temp_dl, "rb") as f:
+                                        pdf_bytes = f.read()
+                                    orig_filename = "drive_downloaded_paper.pdf"
+                                    st.success("Document downloaded from Google Drive.")
+                                else:
+                                    st.error("Failed to download from Drive. Verify that link is public.")
+
+                if pdf_bytes and st.button("⚡ Run Extraction & Ingestion Pipeline", type="primary"):
+                    with st.spinner("Executing extraction, OCR check, diagram clustering, and heuristic scoring..."):
+                        success, msg, summary = process_pdf_document(
+                            file_bytes=pdf_bytes,
+                            original_filename=orig_filename,
+                            subject_id=sel_subj_id,
+                            year=int(in_year),
+                            semester=int(in_sem),
+                            exam_type=in_type,
+                            actor_email=actor,
+                        )
+                    if success:
+                        st.success(msg)
+                        st.json(summary)
+                    else:
+                        st.error(msg)
 
     # SUB-TAB 2: REVIEW QUEUE
     with tab_review:
@@ -783,7 +862,200 @@ elif selected_page == "🛡️ Admin Management Portal":
 
                 st.markdown("---")
 
-    # SUB-TAB 3: TAG & SYLLABUS MANAGER
+    # SUB-TAB 3: MCQ BANK VERIFICATION
+    with tab_mcqs:
+        st.subheader("📝 MCQ Bank Verification")
+        st.caption("Review draft MCQs generated from exam questions and mark them as verified so students can practice with them.")
+
+        all_subs_mcq = get_all_subjects()
+        if not all_subs_mcq:
+            st.info("No subjects available.")
+        else:
+            col_s1, col_s2 = st.columns(2)
+            with col_s1:
+                sel_sub_mcq = st.selectbox("Select Subject", [s["name"] for s in all_subs_mcq], key="mcq_sub_sel")
+                sub_id_mcq = next(s["id"] for s in all_subs_mcq if s["name"] == sel_sub_mcq)
+            with col_s2:
+                mcq_filter_status = st.selectbox("Filter Status", ["All", "draft", "verified"], key="mcq_stat_sel")
+
+            filter_arg = None if mcq_filter_status == "All" else mcq_filter_status
+            subject_mcqs = get_mcqs_for_subject(sub_id_mcq, status=filter_arg)
+
+            if not subject_mcqs:
+                st.info(f"No MCQs found matching '{mcq_filter_status}' status for {sel_sub_mcq}.")
+            else:
+                st.write(f"Showing **{len(subject_mcqs)}** MCQ(s):")
+                for mcq in subject_mcqs[:20]:
+                    mcq_id = mcq["id"]
+                    is_verified = (mcq.get("status") == "verified")
+                    status_badge = "✅ **Verified**" if is_verified else "🟡 **Draft**"
+                    
+                    with st.expander(f"Question #{mcq.get('question_number', '')} ({mcq.get('marks')} Marks) — {status_badge}", expanded=not is_verified):
+                        st.markdown(f"**Question:** {mcq.get('question_text')}")
+                        st.markdown(f"- **A:** {mcq.get('option_a')}")
+                        st.markdown(f"- **B:** {mcq.get('option_b')}")
+                        st.markdown(f"- **C:** {mcq.get('option_c')}")
+                        st.markdown(f"- **D:** {mcq.get('option_d')}")
+                        st.markdown(f"**Correct Option:** `{mcq.get('correct_option')}`")
+                        st.caption(f"Explanation: {mcq.get('explanation')}")
+
+                        if not is_verified:
+                            if st.button("✅ Mark as Verified", key=f"btn_verify_mcq_{mcq_id}", type="primary"):
+                                verify_mcq(mcq_id)
+                                st.success(f"MCQ #{mcq_id} verified successfully!")
+                                st.rerun()
+
+    # SUB-TAB 4: EDIT SUBJECTS, PAPERS & QUESTION SUBDETAILS
+    with tab_edit:
+        st.subheader("✏️ Edit Subjects, Papers & Question Subdetails")
+        st.write("Modify names, syllabus codes, exam years, semesters, or any individual question's marks, text, unit, and tags.")
+
+        edit_choice = st.radio(
+            "Select What You Want to Edit:",
+            ["📚 Edit Subject Details", "📄 Edit Exam Paper Subdetails", "❓ Edit Question Subdetails"],
+            horizontal=True,
+            key="edit_category_radio",
+        )
+
+        st.markdown("---")
+
+        all_subs = get_all_subjects()
+        if not all_subs:
+            st.info("No subjects currently registered in the database.")
+        else:
+            sub_lookup = {s["name"]: s for s in all_subs}
+
+            # 1. EDIT SUBJECT DETAILS
+            if edit_choice == "📚 Edit Subject Details":
+                st.markdown("#### 📚 Modify Subject Name & Syllabus Code")
+                sel_sub_name = st.selectbox("Select Subject to Edit", list(sub_lookup.keys()), key="ed_sub_name_sel")
+                sub_data = sub_lookup[sel_sub_name]
+
+                col_s1, col_s2 = st.columns(2)
+                with col_s1:
+                    updated_name = st.text_input("Subject Full Name", value=sub_data["name"], key="input_ed_sub_name")
+                with col_s2:
+                    updated_code = st.text_input("Syllabus / Course Code (e.g., R5MA2007T)", value=sub_data["code"] or "", key="input_ed_sub_code")
+
+                if st.button("💾 Save Subject Changes", type="primary", key="btn_save_sub_ed"):
+                    if updated_name.strip():
+                        update_subject(sub_data["id"], updated_name.strip(), updated_code.strip())
+                        st.success(f"Subject '{updated_name}' successfully updated!")
+                        st.rerun()
+                    else:
+                        st.error("Subject name cannot be empty.")
+
+            # 2. EDIT EXAM PAPER SUBDETAILS
+            elif edit_choice == "📄 Edit Exam Paper Subdetails":
+                st.markdown("#### 📄 Modify Exam Paper Metadata (Year, Semester, Exam Type)")
+                all_papers = get_all_papers_detailed()
+                if not all_papers:
+                    st.info("No papers currently ingested.")
+                else:
+                    paper_map = {
+                        f"ID #{p['id']} - {p['subject_name']} ({p['year']} {p['exam_type'].upper()}) [Sem {p['semester']}]": p
+                        for p in all_papers
+                    }
+                    sel_p_label = st.selectbox("Select Paper", list(paper_map.keys()), key="ed_paper_sel")
+                    chosen_p = paper_map[sel_p_label]
+
+                    col_p1, col_p2, col_p3 = st.columns(3)
+                    with col_p1:
+                        new_year = st.number_input("Year of Examination", min_value=2015, max_value=2030, value=int(chosen_p["year"]), key="ed_p_year")
+                    with col_p2:
+                        new_sem = st.number_input("Semester", min_value=1, max_value=8, value=int(chosen_p["semester"]), key="ed_p_sem")
+                    with col_p3:
+                        type_idx = 0 if chosen_p["exam_type"].lower() == "midterm" else 1
+                        new_type = st.selectbox("Exam Type", ["midterm", "endterm"], index=type_idx, key="ed_p_type")
+
+                    if st.button("💾 Save Paper Subdetails", type="primary", key="btn_save_p_ed"):
+                        update_paper_details(chosen_p["id"], new_year, new_sem, new_type)
+                        st.success(f"Paper ID #{chosen_p['id']} updated to {new_year} {new_type.upper()} (Sem {new_sem})!")
+                        st.rerun()
+
+            # 3. EDIT QUESTION SUBDETAILS
+            elif edit_choice == "❓ Edit Question Subdetails":
+                st.markdown("#### ❓ Modify Question Subdetails, Marks, Topic & Tags")
+                all_papers = get_all_papers_detailed()
+                if not all_papers:
+                    st.info("No papers available.")
+                else:
+                    paper_map = {
+                        f"ID #{p['id']} - {p['subject_name']} ({p['year']} {p['exam_type'].upper()})": p
+                        for p in all_papers
+                    }
+                    sel_p_lbl = st.selectbox("Filter by Paper", list(paper_map.keys()), key="ed_q_paper_filter")
+                    active_paper_id = paper_map[sel_p_lbl]["id"]
+
+                    paper_questions = get_questions_by_paper(active_paper_id)
+                    if not paper_questions:
+                        st.warning("No questions found in this paper.")
+                    else:
+                        q_map = {
+                            f"Q.{q['question_number']} (Unit {q['unit']}, {q['marks']}M) - {q['question_text'][:60]}...": q
+                            for q in paper_questions
+                        }
+                        chosen_q_label = st.selectbox("Select Question to Edit", list(q_map.keys()), key="ed_q_sel")
+                        q_to_edit = q_map[chosen_q_label]
+                        q_id = q_to_edit["id"]
+
+                        # Show visual snippet
+                        if q_to_edit.get("image_path") and os.path.exists(q_to_edit["image_path"]):
+                            st.image(q_to_edit["image_path"], caption="Current Question Visual Snippet", use_container_width=True)
+
+                        c_q1, c_q2, c_q3 = st.columns(3)
+                        with c_q1:
+                            ed_q_num = st.text_input("Question Label (e.g. Q.1, Q.2)", value=str(q_to_edit["question_number"]), key=f"inp_q_num_{q_id}")
+                        with c_q2:
+                            ed_q_marks = st.number_input("Marks", min_value=1.0, max_value=30.0, step=0.5, value=float(q_to_edit["marks"]), key=f"inp_q_m_{q_id}")
+                        with c_q3:
+                            ed_q_unit = st.number_input("Unit", min_value=1, max_value=10, value=int(q_to_edit["unit"]), key=f"inp_q_u_{q_id}")
+
+                        ed_q_topic = st.text_input("Topic Name", value=q_to_edit.get("topic") or "General", key=f"inp_q_top_{q_id}")
+                        ed_q_text = st.text_area("Question Text", value=q_to_edit["question_text"], height=120, key=f"inp_q_txt_{q_id}")
+
+                        # Interactive Glowing Tag Toggle
+                        st.markdown("##### 🏷️ Assign / Toggle Tags (Multi-select with Green Glow):")
+                        all_db_tags = [t["name"] for t in get_all_tags(active_only=True)]
+                        current_tags = get_question_tags(q_id)
+                        session_tag_key = f"ed_active_tags_{q_id}"
+                        if session_tag_key not in st.session_state:
+                            st.session_state[session_tag_key] = set(current_tags)
+
+                        tag_cols = st.columns(6)
+                        for t_idx, tag_name in enumerate(all_db_tags):
+                            col_tgt = tag_cols[t_idx % 6]
+                            is_active = tag_name in st.session_state[session_tag_key]
+                            btn_label = f"✓ {tag_name}" if is_active else tag_name
+                            with col_tgt:
+                                if st.button(btn_label, key=f"btn_ed_tag_{q_id}_{tag_name}", use_container_width=True):
+                                    if is_active:
+                                        st.session_state[session_tag_key].remove(tag_name)
+                                    else:
+                                        st.session_state[session_tag_key].add(tag_name)
+                                    st.rerun()
+
+                        if st.button(f"💾 Save Changes for Question #{ed_q_num}", type="primary", key=f"btn_save_q_final_{q_id}"):
+                            final_tags = list(st.session_state[session_tag_key])
+                            update_question_details(
+                                question_id=q_id,
+                                question_text=ed_q_text,
+                                marks=ed_q_marks,
+                                unit=ed_q_unit,
+                                topic=ed_q_topic,
+                                is_reviewed=True,
+                                question_number=ed_q_num,
+                            )
+                            update_question_tags(q_id, final_tags)
+                            log_action(
+                                actor=get_current_user_email(),
+                                action="EDIT_QUESTION",
+                                details=f"Question ID {q_id} modified: Q.{ed_q_num}, {ed_q_marks}M, Unit {ed_q_unit}, Topic '{ed_q_topic}'.",
+                            )
+                            st.success(f"Question #{ed_q_num} updated successfully!")
+                            st.rerun()
+
+    # SUB-TAB 4: TAG & SYLLABUS MANAGER
     with tab_tags:
         st.subheader("🏷️ Tag Palette & Vocabulary Manager")
 
@@ -879,18 +1151,23 @@ elif selected_page == "🛡️ Admin Management Portal":
             """
         )
 
-        col_b1, col_b2 = st.columns(2)
+        col_b1, col_b2, col_b3 = st.columns(3)
         with col_b1:
-            if st.button("🔄 Recompute All Predictions Across Subjects", type="primary", use_container_width=True):
+            if st.button("🔄 Recompute All Predictions", type="primary", use_container_width=True):
                 all_subs = get_all_subjects()
                 for s in all_subs:
                     calculate_cluster_predictions(s["id"])
                 st.success("All predictions successfully recomputed with updated recency and gap scores.")
 
         with col_b2:
+            if st.button("🧹 Clean Orphaned Records", use_container_width=True):
+                stats = cleanup_orphaned_records()
+                st.success(f"Cleaned {stats['orphaned_mcqs']} orphaned MCQs and {stats['unused_diagram_groups']} unused diagram groups.")
+
+        with col_b3:
             db_json = export_database_json()
             st.download_button(
-                label="📦 Download Complete Database JSON Backup",
+                label="📦 Download Database Backup",
                 data=db_json,
                 file_name=f"exam_predictor_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
                 mime="application/json",

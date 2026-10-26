@@ -4,10 +4,11 @@ import os
 import re
 import shutil
 import tempfile
-from typing import Any, Dict, List, Optional, Tuple
-import pymupdf as fitz
-from PIL import Image
+from typing import Any, Callable, Dict, List, Optional, Tuple
+import cv2
 import numpy as np
+import pymupdf
+from PIL import Image
 
 from modules.database import (
     get_db_connection,
@@ -15,16 +16,26 @@ from modules.database import (
     add_question,
     add_mcq,
     get_paper_by_hash,
+    get_all_subjects,
+    add_subject,
+    add_source_file,
+    get_source_file_by_hash,
     log_action,
 )
 from modules.hashing import compute_image_phash, find_or_create_diagram_group
+from modules.metadata import extract_metadata, match_subject
 from modules.parser import (
     calculate_confidence_score,
-    extract_page_question_blocks_with_crops,
+    parse_page_questions,
     suggest_tags_from_text,
 )
+from modules.preprocess import preprocess_page_image
+from modules.segmenter import segment_pdf
 
 _RAPID_OCR_ENGINE = None
+
+MAX_PDF_PAGES = 150
+MAX_PDF_BYTES = 100 * 1024 * 1024  # 100 MB
 
 
 def get_rapid_ocr():
@@ -44,14 +55,268 @@ def compute_file_sha256(file_bytes: bytes) -> str:
     return hashlib.sha256(file_bytes).hexdigest()
 
 
-def download_drive_file(drive_url: str, output_path: str) -> bool:
-    """Downloads a public Google Drive file using gdown."""
+def validate_pdf_bytes(file_bytes: bytes) -> Tuple[bool, str]:
+    """Validates that bytes represent a valid PDF within constraints (<= 150 pages, <= 100MB)."""
+    if not file_bytes:
+        return False, "File is empty."
+    if len(file_bytes) > MAX_PDF_BYTES:
+        return False, f"File size exceeds 100 MB limit ({round(len(file_bytes) / (1024 * 1024), 1)} MB)."
+    if not file_bytes.startswith(b"%PDF-"):
+        return False, "Uploaded file is not a valid PDF document (missing %PDF- header)."
+    
     try:
-        import gdown
-        gdown.download(url=drive_url, output=output_path, quiet=False, fuzzy=True)
-        return os.path.exists(output_path) and os.path.getsize(output_path) > 100
-    except Exception:
-        return False
+        doc = pymupdf.open(stream=file_bytes, filetype="pdf")
+        p_count = len(doc)
+        doc.close()
+        if p_count == 0:
+            return False, "PDF contains 0 pages."
+        if p_count > MAX_PDF_PAGES:
+            return False, f"PDF exceeds maximum page limit of 150 pages (has {p_count} pages)."
+    except Exception as e:
+        return False, f"Corrupted or invalid PDF: {e}"
+
+    return True, "Valid PDF"
+
+
+def ingest_combined_pdf(
+    file_bytes: bytes,
+    original_filename: str,
+    actor_email: str = "diyanshah2301@gmail.com",
+    progress_callback: Optional[Callable[[int, int, str], None]] = None,
+) -> Tuple[bool, str, List[Dict[str, Any]]]:
+    """Auto-detects and segregates multiple examination papers from a combined PDF document.
+    
+    1. Stores source file once in data/sources/.
+    2. Runs modules/segmenter.py to slice per-paper PDFs into data/papers/.
+    3. Matches subject via course code or RapidFuzz name similarity.
+    4. Auto-accepts papers with high confidence (>= 0.85).
+    5. Parses questions and crops high-resolution snippets and diagrams.
+    """
+    is_valid, msg = validate_pdf_bytes(file_bytes)
+    if not is_valid:
+        return False, msg, []
+
+    source_sha256 = compute_file_sha256(file_bytes)
+
+    # 1. Store source file in data/sources/
+    sources_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "sources")
+    os.makedirs(sources_dir, exist_ok=True)
+    source_filename = f"source_{source_sha256[:12]}_{original_filename}"
+    source_path = os.path.join(sources_dir, source_filename)
+
+    with open(source_path, "wb") as f:
+        f.write(file_bytes)
+
+    doc_test = pymupdf.open(source_path)
+    page_count = len(doc_test)
+    doc_test.close()
+
+    source_file_id = add_source_file(
+        sha256=source_sha256,
+        filename=original_filename,
+        path=source_path,
+        page_count=page_count,
+    )
+
+    # 2. Run segmenter to identify paper boundaries
+    ocr_eng = get_rapid_ocr()
+    detected = segment_pdf(
+        source_pdf_path=source_path,
+        source_sha256=source_sha256,
+        source_file_id=source_file_id,
+        ocr_engine=ocr_eng if ocr_eng is not False else None,
+        progress_callback=progress_callback,
+    )
+
+    if not detected:
+        return False, "No valid examination papers could be detected in this document.", []
+
+    db_subjects = get_all_subjects()
+    ingested_papers_summary = []
+
+    # 3. Ingest each detected paper
+    for p_info in detected:
+        meta = p_info["metadata"]
+        p_file_hash = p_info["file_hash"]
+        p_file_path = p_info["file_path"]
+
+        # Deduplication check
+        existing = get_paper_by_hash(p_file_hash)
+        if existing:
+            ingested_papers_summary.append({
+                "paper_id": existing["id"],
+                "subject_name": "Already Ingested",
+                "page_range": f"{p_info['page_start']}-{p_info['page_end']}",
+                "status": "duplicate",
+                "quality_score": p_info["quality_score"],
+                "metadata_confidence": meta.get("metadata_confidence", 0.0),
+                "questions_count": 0,
+                "thumbnail_path": p_info["thumbnail_path"],
+                "meta": meta,
+            })
+            continue
+
+        # Match or propose subject
+        c_code = meta["course_code"]["value"]
+        c_name = meta["course_name"]["value"]
+        sub_match = match_subject(c_code, c_name, db_subjects)
+
+        if sub_match["matched"]:
+            subj_id = sub_match["subject_id"]
+            subj_name = sub_match["subject_name"]
+        else:
+            # Create pending / new subject
+            subj_name = sub_match.get("proposed_name") or f"Course {c_code}"
+            subj_id = add_subject(name=subj_name, code=c_code)
+            db_subjects = get_all_subjects()  # Refresh cache
+
+        yr = meta["year"]["value"]
+        sem = meta["semester"]["value"]
+        e_type = meta["exam_type"]["value"]
+        is_makeup_val = meta["is_makeup"]["value"]
+        max_marks_val = meta["max_marks"]["value"]
+        meta_conf = meta["metadata_confidence"]
+
+        # Auto-accept criteria: confidence >= 0.85
+        initial_status = "accepted" if meta_conf >= 0.85 else "pending_review"
+
+        paper_id = add_paper(
+            subject_id=subj_id,
+            year=yr,
+            semester=sem,
+            exam_type=e_type,
+            file_hash=p_file_hash,
+            file_path=p_file_path,
+            source_file_id=source_file_id,
+            page_start=p_info["page_start"],
+            page_end=p_info["page_end"],
+            course_code=c_code,
+            course_name_raw=c_name,
+            exam_name_raw=meta["exam_name"]["value"],
+            exam_date=meta["exam_date"]["value"],
+            program=meta["program"]["value"],
+            branch=meta["branch"]["value"],
+            study_year=meta["study_year"]["value"],
+            duration_minutes=meta["duration_minutes"]["value"],
+            max_marks=max_marks_val,
+            is_makeup=is_makeup_val,
+            quality_score=p_info["quality_score"],
+            metadata_confidence=meta_conf,
+            status=initial_status,
+        )
+
+        # 4. Parse Questions for this sliced paper
+        paper_doc = pymupdf.open(p_file_path)
+        paper_questions = []
+        open_q = None
+        carry_num = 1
+
+        for p_idx in range(len(paper_doc)):
+            page_obj = paper_doc[p_idx]
+            pix = page_obj.get_pixmap(dpi=150)
+            img_np = np.frombuffer(pix.samples, dtype=np.uint8).reshape((pix.height, pix.width, pix.n))
+            bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR) if pix.n == 3 else img_np
+            pre = preprocess_page_image(bgr)
+
+            ocr_res = []
+            if ocr_eng:
+                res, _ = ocr_eng(pre["clean_bgr"])
+                if res:
+                    ocr_res = res
+
+            qs, open_q, carry_num = parse_page_questions(
+                page_img_bgr=pre["clean_bgr"],
+                ocr_lines=ocr_res,
+                paper_id=paper_id,
+                page_no=p_idx + 1,
+                carry_parent_num=carry_num,
+                open_question_from_prev_page=open_q,
+            )
+            paper_questions.extend(qs)
+
+        if open_q:
+            paper_questions.append(open_q)
+        paper_doc.close()
+
+        # 5. Commit questions to DB
+        q_count = 0
+        for q in paper_questions:
+            q_num = q["question_number"]
+            q_text = q["question_text"]
+            img_path = q.get("image_path")
+            fig_path = q.get("figure_path")
+            fig_phash = q.get("figure_phash")
+
+            # Diagram group matching
+            diagram_grp_id = None
+            if fig_phash:
+                grp_id, _, _ = find_or_create_diagram_group(fig_phash, max_hamming_distance=5)
+                diagram_grp_id = grp_id
+            elif img_path:
+                ph = compute_image_phash(img_path)
+                if ph:
+                    grp_id, _, _ = find_or_create_diagram_group(ph, max_hamming_distance=5)
+                    diagram_grp_id = grp_id
+
+            # Estimate syllabus unit from parent question number
+            p_num = q.get("parent_question_number") or 1
+            estimated_unit = max(1, min(5, (p_num + 1) // 2))
+
+            q_id = add_question(
+                paper_id=paper_id,
+                question_number=q_num,
+                question_text=q_text,
+                content_type="diagram" if (fig_path or img_path) else "text",
+                image_path=img_path,
+                phash=fig_phash,
+                diagram_group_id=diagram_grp_id,
+                marks=q["marks"],
+                unit=estimated_unit,
+                topic=f"Unit {estimated_unit} Concepts",
+                confidence_score=q["confidence_score"],
+                is_reviewed=(q["confidence_score"] >= 0.80),
+                tag_names=q.get("tag_names", []),
+                parent_question_number=p_num,
+                part_label=q.get("part_label"),
+                co_tag=q.get("co_tag"),
+                page_no=q.get("page_no"),
+                is_continuation=q.get("is_continuation", 0),
+                figure_path=fig_path,
+                figure_phash=fig_phash,
+            )
+            q_count += 1
+
+            # Seed initial draft MCQ
+            add_mcq(
+                question_id=q_id,
+                option_a=f"Primary analytical solution for Question {q_num}",
+                option_b="Secondary alternate implementation rule",
+                option_c="Neither: Represents an edge-case condition",
+                option_d="Both primary concept and alternate rule apply",
+                correct_option="A",
+                explanation=f"Official reference answer for Question {q_num} covering Unit {estimated_unit}.",
+                status="draft",
+            )
+
+        log_action(
+            actor=actor_email,
+            action="INGEST_PAPER_AUTOSEG",
+            details=f"Ingested Paper ID {paper_id} ({subj_name}, {yr} {e_type}) with {q_count} questions.",
+        )
+
+        ingested_papers_summary.append({
+            "paper_id": paper_id,
+            "subject_name": subj_name,
+            "page_range": f"{p_info['page_start']}-{p_info['page_end']}",
+            "status": initial_status,
+            "quality_score": p_info["quality_score"],
+            "metadata_confidence": meta_conf,
+            "questions_count": q_count,
+            "thumbnail_path": p_info["thumbnail_path"],
+            "meta": meta,
+        })
+
+    return True, f"Successfully processed {len(detected)} detected examination paper(s).", ingested_papers_summary
 
 
 def process_pdf_document(
@@ -63,9 +328,8 @@ def process_pdf_document(
     exam_type: str,
     actor_email: str = "diyanshah2301@gmail.com",
 ) -> Tuple[bool, str, Dict[str, Any]]:
-    """Complete ingestion pipeline with Option 2 Visual Question Cropping:
-    Extracts clubbed questions (1A+1B+1C), crops high-resolution question snippets
-    preserving all math symbols, and stores database records.
+    """Manual Single Paper Ingestion Override:
+    Takes explicit metadata from the user, crops snippets, and stores database records.
     """
     file_hash = compute_file_sha256(file_bytes)
     
@@ -93,106 +357,99 @@ def process_pdf_document(
         file_path=saved_path,
     )
 
-    doc = fitz.open(saved_path)
+    doc = pymupdf.open(saved_path)
     total_pages = len(doc)
-    parsed_questions_count = 0
-    low_confidence_count = 0
-    extracted_snippets_count = 0
     ocr_engine = get_rapid_ocr()
 
     all_page_questions: List[Dict[str, Any]] = []
+    open_q = None
+    carry_num = 1
 
-    # 4. Process each page: render high-res image & extract clubbed question blocks with visual crops
     for page_idx in range(total_pages):
         page = doc[page_idx]
-        
-        # Render high-res page image (150 DPI)
         pix = page.get_pixmap(dpi=150)
-        page_img = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
-        img_np = np.array(page_img)
+        img_np = np.frombuffer(pix.samples, dtype=np.uint8).reshape((pix.height, pix.width, pix.n))
+        bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR) if pix.n == 3 else img_np
+        pre = preprocess_page_image(bgr)
 
-        # Run OCR
         ocr_result = []
         if ocr_engine:
-            res, _ = ocr_engine(img_np)
+            res, _ = ocr_engine(pre["clean_bgr"])
             if res:
                 ocr_result = res
 
-        # Extract clubbed questions with image snippets
-        page_q_blocks = extract_page_question_blocks_with_crops(
-            page_img=page_img,
+        qs, open_q, carry_num = parse_page_questions(
+            page_img_bgr=pre["clean_bgr"],
             ocr_lines=ocr_result,
             paper_id=paper_id,
-            page_idx=page_idx,
+            page_no=page_idx + 1,
+            carry_parent_num=carry_num,
+            open_question_from_prev_page=open_q,
         )
+        all_page_questions.extend(qs)
 
-        for q in page_q_blocks:
-            all_page_questions.append(q)
-
+    if open_q:
+        all_page_questions.append(open_q)
     doc.close()
 
     if not all_page_questions:
         with get_db_connection() as conn:
             conn.execute("DELETE FROM papers WHERE id = ?;", (paper_id,))
             conn.commit()
-        return False, "Failed to parse questions: No legible text or question boundaries (e.g. Q.1, Q.2) could be extracted from this document.", {}
+        if os.path.exists(saved_path):
+            os.remove(saved_path)
+        return False, "Failed to parse questions: No legible questions or anchors could be extracted.", {}
 
-    # 5. Commit questions with visual crops, pHash, tags & confidence scores
+    parsed_count = 0
+    extracted_snippets_count = 0
+    low_confidence_count = 0
+
     for idx, q_data in enumerate(all_page_questions):
         q_num = q_data["question_number"]
         q_text = q_data["question_text"]
         image_path = q_data.get("image_path")
-        marks = q_data.get("marks", 5.0)
-        marks_found = q_data.get("marks_found", True)
+        fig_path = q_data.get("figure_path")
+        fig_phash = q.get("figure_phash")
 
-        auto_tags = suggest_tags_from_text(q_text)
-        phash_val = None
-        diagram_grp_id = None
-
-        if image_path:
+        if image_path or fig_path:
             extracted_snippets_count += 1
-            phash_val = compute_image_phash(image_path)
-            if phash_val:
-                grp_id, _, _ = find_or_create_diagram_group(phash_val, max_hamming_distance=5)
-                diagram_grp_id = grp_id
 
-        # Estimate syllabus unit
-        try:
-            num_int = int(re.sub(r"\D", "", q_num)) if re.sub(r"\D", "", q_num) else (idx + 1)
-            estimated_unit = max(1, min(5, (num_int + 1) // 2))
-        except Exception:
-            estimated_unit = 1
+        diagram_grp_id = None
+        if fig_phash:
+            grp_id, _, _ = find_or_create_diagram_group(fig_phash, max_hamming_distance=5)
+            diagram_grp_id = grp_id
 
-        confidence = calculate_confidence_score(
-            text=q_text,
-            marks_found=marks_found,
-            is_ocr=True,
-            has_snippet=(image_path is not None),
-        )
-        is_reviewed = (confidence >= 0.80)
-        if not is_reviewed:
+        p_num = q_data.get("parent_question_number") or 1
+        estimated_unit = max(1, min(5, (p_num + 1) // 2))
+
+        conf = q_data.get("confidence_score", 0.9)
+        if conf < 0.80:
             low_confidence_count += 1
 
-        # Commit question
         q_id = add_question(
             paper_id=paper_id,
             question_number=q_num,
             question_text=q_text,
-            content_type="diagram" if image_path else "text",
+            content_type="diagram" if (fig_path or image_path) else "text",
             image_path=image_path,
-            phash=phash_val,
+            phash=fig_phash,
             diagram_group_id=diagram_grp_id,
-            marks=marks,
+            marks=q_data.get("marks", 5.0),
             unit=estimated_unit,
             topic=f"Unit {estimated_unit} Concepts",
-            confidence_score=confidence,
-            is_reviewed=is_reviewed,
-            tag_names=auto_tags,
+            confidence_score=conf,
+            is_reviewed=(conf >= 0.80),
+            tag_names=q_data.get("tag_names", []),
+            parent_question_number=p_num,
+            part_label=q_data.get("part_label"),
+            co_tag=q_data.get("co_tag"),
+            page_no=q_data.get("page_no"),
+            is_continuation=q_data.get("is_continuation", 0),
+            figure_path=fig_path,
+            figure_phash=fig_phash,
         )
-        parsed_questions_count += 1
+        parsed_count += 1
 
-        # Seed initial starter MCQ entry for student quiz bank
-        preview_text = q_text[:50].replace("\n", " ")
         add_mcq(
             question_id=q_id,
             option_a=f"Primary analytical solution for Question {q_num}",
@@ -200,21 +457,22 @@ def process_pdf_document(
             option_c="Neither: Represents an edge-case condition",
             option_d="Both primary concept and alternate rule apply",
             correct_option="A",
-            explanation=f"Official solution reference for Question {q_num} covering Unit {estimated_unit}.",
+            explanation=f"Official reference answer for Question {q_num}.",
+            status="draft",
         )
 
     log_action(
         actor=actor_email,
-        action="INGEST_PAPER",
-        details=f"Paper ID {paper_id} ingested. {parsed_questions_count} clubbed questions extracted with visual snippets.",
+        action="INGEST_PAPER_MANUAL",
+        details=f"Paper ID {paper_id} ingested manually. {parsed_count} questions extracted.",
     )
 
     summary = {
         "paper_id": paper_id,
         "total_pages": total_pages,
-        "questions_parsed": parsed_questions_count,
+        "questions_parsed": parsed_count,
         "visual_snippets_cropped": extracted_snippets_count,
         "low_confidence_review_queue": low_confidence_count,
     }
 
-    return True, f"Successfully parsed {original_filename} into {parsed_questions_count} questions with high-resolution visual question snippets.", summary
+    return True, f"Successfully parsed {original_filename} into {parsed_count} questions.", summary
