@@ -1,5 +1,4 @@
 import math
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 from modules.database import get_db_connection
 from modules.matcher import cluster_questions_for_subject
@@ -13,6 +12,8 @@ def calculate_cluster_predictions(
     w_r: float = 0.30,
     w_g: float = 0.20,
     w_m: float = 0.15,
+    *,
+    max_year_exclusive: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """Calculates deterministic repetition likelihood for each question cluster
     using frequency, exponential recency decay, gap cycle analysis, and marks weight.
@@ -21,10 +22,6 @@ def calculate_cluster_predictions(
     """
     # Ensure all questions under this subject are clustered
     cluster_questions_for_subject(subject_id)
-
-    # Determine reference year
-    if current_year is None:
-        current_year = datetime.now().year
 
     # Query all questions, papers and cluster info
     with get_db_connection() as conn:
@@ -38,10 +35,13 @@ def calculate_cluster_predictions(
             JOIN papers p ON q.paper_id = p.id
             WHERE p.subject_id = ?
         """
-        params = [subject_id]
+        params: List[Any] = [subject_id]
         if exam_type:
             query += " AND p.exam_type = ?"
             params.append(exam_type.lower())
+        if max_year_exclusive is not None:
+            query += " AND p.year < ?"
+            params.append(max_year_exclusive)
         
         query += " ORDER BY q.cluster_id, p.year ASC;"
         cursor.execute(query, tuple(params))
@@ -54,6 +54,10 @@ def calculate_cluster_predictions(
     distinct_years = sorted(list({r["year"] for r in rows}))
     n_years = max(1, len(distinct_years))
     max_marks_observed = max([r["marks"] for r in rows] or [10.0])
+
+    # Determine reference year (default to next exam year after latest data year)
+    if current_year is None:
+        current_year = max(distinct_years) + 1
 
     # Group by cluster_id
     clusters: Dict[int, List[Dict[str, Any]]] = {}
@@ -138,6 +142,15 @@ def calculate_cluster_predictions(
             "frequency_score": round(f_hat * 100, 1),
             "recency_score": round(r_hat * 100, 1),
             "gap_score": round(g_hat * 100, 1),
+            "marks_score": round(m_hat * 100, 1),
+            "contributions": {
+                "frequency": round(w_f * f_hat * 100, 1),
+                "recency": round(w_r * r_hat * 100, 1),
+                "gap": round(w_g * g_hat * 100, 1),
+                "marks": round(w_m * m_hat * 100, 1),
+            },
+            "data_years": n_years,
+            "low_data_warning": n_years < 3,
             "members": members,
         })
 

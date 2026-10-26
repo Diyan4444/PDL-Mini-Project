@@ -1,12 +1,17 @@
 # Python Historical Exam Question Predictor & Adaptive Quiz Bank
 
-A complete, production-grade academic system built in **100% Python** using **Streamlit**, designed for university computer science and engineering coursework. It extracts, deduplicates, and analyzes past examination papers over a 4–5 year window, calculates deterministic question repetition likelihoods, and provides an interactive practice quiz portal with diagnostic analytics.
+A complete, production-grade academic system built in **100% Python** using **Streamlit**, designed for university computer science and engineering coursework. It extracts, deduplicates, and analyzes past examination papers over a multi-year window, calculates deterministic question repetition likelihoods, and provides an interactive practice quiz portal with diagnostic analytics.
 
 ---
 
 ## 🌟 Key Features
 
-### 1. Ingestion Pipeline & Auto-Segregation
+### 1. Overview Dashboard
+- **Executive Summary Metrics**: High-level view of ingested papers, extracted questions, academic years covered, and verified MCQ bank count.
+- **Unit-Wise Distribution Charts**: Interactive bar charts tracking questions per unit and average repetition likelihood per syllabus unit.
+- **Top Predicted Questions**: Quick-look preview cards for the highest-likelihood questions across the syllabus.
+
+### 2. Ingestion Pipeline & Auto-Segregation
 - **Combined Multi-Paper PDF Intake**: Ingest single or concatenated multi-paper PDFs (up to 150 pages / 100 MB). The auto-segregator classifies pages into `FIRST_PAGE`, `CONTINUATION`, and `BLANK`, detects paper boundaries using header table keywords, and slices per-paper PDFs into `data/papers/`.
 - **Advanced Computer Vision Preprocessing**:
   - **Deskew**: Detects orientation via text binarization moments and deskews images ($\pm 45^\circ$).
@@ -16,37 +21,43 @@ A complete, production-grade academic system built in **100% Python** using **St
 - **Dual-Style Question Anchor Detection**:
   - **Prefixed Style**: Matches `Q.1`, `Q.2`, `1(a)`, `2b)` style anchors.
   - **Columnar Table Style**: Automatically parses tables with `Q.Nos`, `Questions`, `Marks`, and `CO` columns. Carries question numbers forward across subparts `b`, `c` and delineates question rows via right-column Marks/CO anchors (`[CO1] [5]`, `[CO2] [7]`, `(5) CO1`).
-- **Inter-Page Continuation Resolution**: Resolves questions spanning page breaks (such as text on Page $N$ with its associated graph on the top of Page $N+1$ before the next question), setting `is_continuation = 1` and appending cropped diagram assets.
+- **Inter-Page Continuation Resolution**: Resolves questions spanning page breaks, setting `is_continuation = 1` and appending cropped diagram assets.
 - **Isolated Figure Detection**: Masks text bounding boxes and table rules to isolate non-text ink components (graphs, circuits, diagrams $\ge 2500\text{ px}^2$), computing a 64-bit perceptual hash (`pHash`) to cluster recurring figures across years.
 - **Automated Metadata Extraction**: Extracts course name, course code (e.g. `R5IT2002T`, `R5MA2007T`), exam type (normalized to `midterm` or `endterm`), date, academic year, semester, duration, max marks, and `is_makeup` flag with confidence scoring.
 
-### 2. Deterministic Prediction Engine (Zero ML)
+### 3. Pipeline Inspector (Admin)
+- Side-by-side inspection of raw rendered PDF pages (at 110 DPI), preprocessed clean BGR images, and OpenCV bounding box overlays highlighting parsed questions and table cells with their question numbers.
+
+### 4. Deterministic Prediction Engine (Zero ML)
 - **Fuzzy Text Deduplication**: Groups semantically similar questions using `RapidFuzz` Token Sort Ratio ($\ge 85\%$).
 - **Multi-Factor Heuristic Formula**:
   $$\text{Score}(C) = w_f \cdot \hat{F}(C) + w_r \cdot \hat{R}(C) + w_g \cdot \hat{G}(C) + w_m \cdot \hat{M}(C)$$
-  - **Frequency ($\hat{F}$)**: Distinct year appearances over the historical observation window.
-  - **Recency ($\hat{R}$)**: Exponential decay weighting ($\lambda = 0.3$) prioritizing recent exam years.
-  - **Gap Analysis ($\hat{G}$)**: Awards a cyclical boost for questions absent 1–2 years following historical rotation cycles.
-  - **Marks Weight ($\hat{M}$)**: Normalizes question weight relative to syllabus maximums.
+  - **Frequency ($\hat{F}$)**: Distinct year appearances over the historical observation window ($w_f = 0.35$).
+  - **Recency ($\hat{R}$)**: Exponential decay weighting ($\lambda = 0.3$) prioritizing recent exam years ($w_r = 0.30$).
+  - **Gap Analysis ($\hat{G}$)**: Awards a cyclical boost for questions absent 1–2 years following historical rotation cycles ($w_g = 0.20$).
+  - **Marks Weight ($\hat{M}$)**: Normalizes question weight relative to syllabus maximums ($w_m = 0.15$).
   - **Categorization**: High ($\ge 70\%$), Medium ($45 - 69\%$), and Low ($< 45\%$) likelihood badges.
+- **Data Volume Recommendation**: For reliable predictions, a **minimum of 3 years of papers** is recommended. When fewer years are available, a clear low-data warning is presented and predictions remain indicative.
+- **Contribution Breakdown & Export**: Stacked component bars show the exact point contribution of Frequency, Recency, Gap, and Marks, with one-click CSV export.
 
-### 3. Student Adaptive Quiz & Diagnostics
-- **5-Option MCQ Format**: Options A, B, C, D, plus **Option E**: *"🚫 Not in my syllabus / Skip"*.
-- **Verified Question Serving**: Student quizzes serve verified MCQs, ensuring high exam fidelity.
-- **Non-Penalizing Skip Logic**: Option E excludes questions from topic accuracy denominators, ensuring student diagnostic metrics remain untainted.
-- **Diagnostic Matrix**: Calculates Revision Priority Score ($P = (1 - \text{Accuracy}) \times \text{Exam Likelihood}$).
-- **1-Click Remedial Quiz**: Immediately launches a focused retry quiz strictly reusing stored MCQs for identified weak topics.
+### 5. Back-Testing Engine (Leak-Free)
+- Evaluates prediction accuracy strictly using papers prior to the test year ($Y < T$).
+- Features rolling back-tests comparing hit rate against a naive recency baseline over historical exam cycles.
 
-### 4. Admin Portal & Tag Management
-- **Security & Authorization**: Hardcoded server-side authorization strictly bound to `diyanshah2301@gmail.com` with Google OIDC (`st.login`, `st.user.email_verified == True`). Local dev passcode authentication enabled exclusively when `DEV_MODE=1`.
-- **Glowing Green/Black Toggle Tags**: Multi-select tag buttons featuring customized CSS styling (`#28a745` background, black text, and soft glowing drop-shadows) using `.st-key-<key> button` selectors.
-- **MCQ Verification Queue**: Dedicated administrative queue to review and approve draft MCQs.
-- **Orphan Cleanup**: 1-click database maintenance to prune orphaned MCQs and unused diagram groups.
+### 6. Student Accounts & Adaptive Quiz Bank
+- **Secure Student Authentication**: Salted PBKDF2-HMAC-SHA256 password hashing with registration and login sub-tabs. Student IDs are strictly derived from authenticated accounts.
+- **Rule-Based & Verified MCQs**:
+  - Deterministic generators create questions testing topic classification (`rule_based_topic`), cognitive task verb identification (`rule_based_task`), and historical repetition (`rule_based_repeat`).
+  - Instructors can author verified subject-matter MCQs via the admin portal.
+  - Archived legacy placeholder MCQs are preserved in the database for audit integrity but excluded from student quizzes.
+- **Adaptive Question Selection**: Biased toward a student's unmastered weak topics while down-weighting questions recently answered correctly.
+- **Non-Penalizing Skip Logic**: Option E (*"🚫 Not in my syllabus / Skip"*) cleanly excludes questions from accuracy calculations. All-skipped topics are listed separately without diagnostic penalty.
+- **Immediate Feedback & Remedial Flow**: Interactive "Check answer" validation with explanations, timer tracking, and one-click remedial retries for incorrect questions.
 
-### 5. Extended Lab Presentation Capabilities
-- **Back-Testing Engine**: Objectively evaluates prediction accuracy by predicting Year $T$ using solely years $< T$ and computing the empirical hit-rate.
-- **Mock Exam Generator**: Generates 40-mark Midterm (Units 1–2) and 100-mark Endterm (Units 1–5) examination blueprints.
-- **ReportLab PDF Export**: Downloads printable study sheets with prediction badges and syllabus references.
+### 7. Admin Portal & Security Hardening
+- **Dev & Production Authentication**: Constant-time `hmac.compare_digest` passcode checks with brute-force lockout (5 attempts / 60 seconds lockout) in development mode (`DEV_MODE=1`), and Google OIDC in production.
+- **Safe HTML Rendering**: All user-derived strings in HTML contexts are sanitized through `safe()` to prevent XSS injection.
+- **Orphan Cleanup Safeguards**: Two-stage orphan preview and confirmed cleanup with automatic JSON audit backups saved to `data/backups/`.
 
 ---
 
@@ -60,13 +71,15 @@ cd "c:\Users\Diyan\Desktop\PDL Lab\Project_pdl"
 ### 2. Install Python Dependencies
 ```bash
 pip install -r requirements.txt
+pip install -r requirements-dev.txt
 ```
 
 ### 3. Configure Secrets
-Edit `.streamlit/secrets.toml`:
+Create `.streamlit/secrets.toml` (see `.streamlit/secrets.toml.example`):
 ```toml
 admin_email = "diyanshah2301@gmail.com"
-admin_dev_passcode = "admin123"
+admin_dev_passcode = "your_secure_dev_passcode"
+DEV_MODE = "1"
 ```
 
 ### 4. Run the Streamlit Application
@@ -77,14 +90,22 @@ Open your browser at `http://localhost:8501`.
 
 ---
 
-## 🧪 Running the Pytest Suite
+## 🧪 Running Tests & Code Quality
+
+### 1. Run Unit & Regression Tests
 ```bash
+# Run all tests
+pytest tests/ -q
+
+# Run regression fix tests
+pytest tests/test_fixes.py -v
+
+# Run end-to-end pipeline tests
 pytest tests/test_pipeline.py -v
 ```
-Validates the complete end-to-end pipeline against test fixtures:
-- DAA camera scan fixture (7 subquestions, 40 marks, Dijkstra continuation, 4 diagram crops).
-- Math multi-paper fixture (2 discrete papers, make-up detection).
-- Concatenated 6-page multi-paper intake.
-- Synthetic image degradation and quality scoring.
-- Marks and Course Outcome (CO) edge cases.
-- Database migration idempotency.
+
+### 2. Run Static Analysis (Pyflakes)
+```bash
+python -m pyflakes modules app.py tests
+```
+Must exit with return code 0 and zero warnings.

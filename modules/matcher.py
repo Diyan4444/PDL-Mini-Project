@@ -1,5 +1,5 @@
 import re
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List
 from rapidfuzz import fuzz
 from modules.database import get_db_connection
 

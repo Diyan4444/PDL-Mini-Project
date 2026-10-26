@@ -1,15 +1,12 @@
 import os
-import sys
 import tempfile
 import cv2
 import numpy as np
 import pymupdf
-import pytest
 
 from modules.database import get_db_connection, init_db
-from modules.metadata import extract_metadata, match_subject
 from modules.parser import parse_marks_and_co, parse_page_questions
-from modules.preprocess import compute_quality_score, deskew_image, preprocess_page_image, remove_shadows_and_illumination
+from modules.preprocess import compute_quality_score, preprocess_page_image
 from modules.segmenter import segment_pdf
 
 FIXTURES_DIR = os.path.join(os.path.dirname(__file__), "fixtures")

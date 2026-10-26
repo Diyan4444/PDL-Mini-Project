@@ -1,5 +1,8 @@
+import hmac
 import os
+import time
 import streamlit as st
+from modules.database import create_student_account, verify_student_account
 
 ADMIN_EMAIL = "diyanshah2301@gmail.com"
 
@@ -24,6 +27,18 @@ def is_admin(user_email: str) -> bool:
     if not user_email:
         return False
     return user_email.strip().lower() == ADMIN_EMAIL.lower()
+
+
+def verify_dev_admin(email: str, passcode: str, configured_pass: str) -> bool:
+    """Verifies dev admin credentials using hmac.compare_digest on UTF-8 bytes.
+    
+    Returns False if configured_pass, email, or passcode is empty, or email is not admin.
+    """
+    if not configured_pass or not email or not passcode:
+        return False
+    if not is_admin(email):
+        return False
+    return hmac.compare_digest(passcode.encode("utf-8"), configured_pass.encode("utf-8"))
 
 
 def is_dev_mode() -> bool:
@@ -136,51 +151,95 @@ def render_login_widget():
                 if is_dev_mode():
                     with tabs[tab_idx]:
                         st.caption("Local development passcode authentication (`DEV_MODE=1`).")
-                        admin_input_email = st.text_input(
-                            "Admin Gmail",
-                            value=ADMIN_EMAIL,
-                            key="input_admin_email"
-                        )
                         
-                        configured_pass = "admin123"
+                        configured_pass = ""
                         try:
                             if "admin_dev_passcode" in st.secrets:
                                 configured_pass = str(st.secrets["admin_dev_passcode"]).strip()
                         except Exception:
                             pass
-                        
-                        admin_passcode = st.text_input(
-                            "Passcode", 
-                            type="password", 
-                            key="input_admin_pass",
-                            placeholder="Enter admin passcode"
-                        )
-                        
-                        if st.button("Authenticate Admin", key="btn_admin_login", use_container_width=True, type="primary"):
-                            target_email = admin_input_email.strip().lower() if admin_input_email.strip() else ADMIN_EMAIL.lower()
-                            entered_pass = admin_passcode.strip()
-                            
-                            if is_admin(target_email) and (entered_pass == configured_pass or entered_pass == "admin123"):
-                                st.session_state.user_email = ADMIN_EMAIL
-                                st.session_state.is_authenticated = True
-                                st.session_state.user_role = "admin"
-                                st.session_state.nav_selection = "🛡️ Admin Management Portal"
-                                st.success("Admin authenticated successfully!")
-                                st.rerun()
+                        if not configured_pass:
+                            configured_pass = os.environ.get("ADMIN_DEV_PASSCODE", "").strip()
+
+                        if not configured_pass:
+                            st.warning("Dev admin login disabled: set admin_dev_passcode in .streamlit/secrets.toml")
+                        else:
+                            now = time.time()
+                            locked_until = st.session_state.get("admin_locked_until", 0.0)
+                            if now < locked_until:
+                                remaining = int(locked_until - now)
+                                st.error(f"Dev admin locked out due to repeated failures. Try again in {remaining}s.")
                             else:
-                                st.error(f"Invalid credentials. Admin email must be '{ADMIN_EMAIL}' and passcode must match.")
+                                admin_input_email = st.text_input(
+                                    "Admin Gmail",
+                                    value=ADMIN_EMAIL,
+                                    key="input_admin_email"
+                                )
+                                admin_passcode = st.text_input(
+                                    "Passcode", 
+                                    type="password", 
+                                    key="input_admin_pass",
+                                    placeholder="Enter admin passcode"
+                                )
+                                if st.button("Authenticate Admin", key="btn_admin_login", use_container_width=True, type="primary"):
+                                    target_email = admin_input_email.strip().lower() if admin_input_email.strip() else ADMIN_EMAIL.lower()
+                                    entered_pass = admin_passcode.strip()
+                                    
+                                    if verify_dev_admin(target_email, entered_pass, configured_pass):
+                                        st.session_state.user_email = ADMIN_EMAIL
+                                        st.session_state.is_authenticated = True
+                                        st.session_state.user_role = "admin"
+                                        st.session_state.admin_fail_count = 0
+                                        st.session_state.admin_locked_until = 0.0
+                                        st.session_state.nav_selection = "🛡️ Admin Management Portal"
+                                        st.success("Admin authenticated successfully!")
+                                        st.rerun()
+                                    else:
+                                        fails = st.session_state.get("admin_fail_count", 0) + 1
+                                        st.session_state.admin_fail_count = fails
+                                        if fails >= 5:
+                                            st.session_state.admin_locked_until = time.time() + 60.0
+                                            st.session_state.admin_fail_count = 0
+                                            st.error("Too many failed attempts. Locked for 60 seconds.")
+                                        else:
+                                            st.error(f"Invalid credentials ({5 - fails} attempts remaining).")
                     tab_idx += 1
 
                 with tabs[tab_idx]:
-                    student_id = st.text_input("Enter Student ID or Name", key="input_student_id")
-                    if st.button("Enter as Student", key="btn_student_login", use_container_width=True):
-                        if student_id.strip():
-                            st.session_state.user_email = f"{student_id.strip().lower()}@student.local"
-                            st.session_state.is_authenticated = True
-                            st.session_state.user_role = "student"
-                            st.rerun()
-                        else:
-                            st.warning("Please enter a valid student identifier.")
+                    st.caption("Sign in with your student account or register a new one.")
+                    stu_tab_in, stu_tab_reg = st.tabs(["Sign In", "Register"])
+                    
+                    with stu_tab_in:
+                        s_id = st.text_input("Student ID", key="input_student_id")
+                        s_pass = st.text_input("Password", type="password", key="input_student_pass")
+                        if st.button("Sign In as Student", key="btn_student_signin", use_container_width=True, type="primary"):
+                            if verify_student_account(s_id, s_pass):
+                                st.session_state.user_email = f"{s_id.strip().lower()}@student.local"
+                                st.session_state.is_authenticated = True
+                                st.session_state.user_role = "student"
+                                st.success("Signed in successfully!")
+                                st.rerun()
+                            else:
+                                st.error("Invalid student ID or password.")
+                                
+                    with stu_tab_reg:
+                        reg_id = st.text_input("Student ID (3-30 chars, [a-z0-9_.-])", key="reg_student_id")
+                        reg_name = st.text_input("Display Name", key="reg_student_name")
+                        reg_pass = st.text_input("Password (min 8 chars)", type="password", key="reg_student_pass")
+                        reg_confirm = st.text_input("Confirm Password", type="password", key="reg_student_pass_confirm")
+                        if st.button("Register Account", key="btn_student_register", use_container_width=True):
+                            if reg_pass != reg_confirm:
+                                st.error("Passwords do not match.")
+                            else:
+                                ok, msg = create_student_account(reg_id, reg_name, reg_pass)
+                                if ok:
+                                    st.session_state.user_email = f"{reg_id.strip().lower()}@student.local"
+                                    st.session_state.is_authenticated = True
+                                    st.session_state.user_role = "student"
+                                    st.success("Account registered and logged in!")
+                                    st.rerun()
+                                else:
+                                    st.error(msg)
 
 
 def require_admin() -> bool:

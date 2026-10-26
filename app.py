@@ -1,8 +1,12 @@
+import json
 import os
 import time
 from datetime import datetime
-import streamlit as st
+import cv2
+import numpy as np
 import pandas as pd
+import pymupdf
+import streamlit as st
 
 from modules.database import (
     get_db_connection,
@@ -13,14 +17,11 @@ from modules.database import (
     delete_subject,
     delete_paper,
     update_paper_details,
-    get_paper_details,
     get_all_papers_detailed,
     get_questions_by_paper,
     get_all_tags,
     add_tag,
     merge_tags,
-    toggle_tag_active,
-    get_unreviewed_questions,
     get_questions_for_review,
     approve_all_high_confidence_questions,
     update_question_details,
@@ -28,9 +29,11 @@ from modules.database import (
     update_question_tags,
     export_database_json,
     log_action,
+    add_mcq,
     verify_mcq,
     get_mcqs_for_subject,
-    cleanup_orphaned_records,
+    preview_orphans,
+    cleanup_orphans,
 )
 from modules.auth import (
     render_login_widget,
@@ -42,13 +45,18 @@ from modules.ingestion import process_pdf_document, download_drive_file, ingest_
 from modules.scoring import calculate_cluster_predictions
 from modules.quiz_engine import (
     load_quiz_questions,
+    load_questions_by_ids,
     init_quiz_session,
     submit_quiz_attempt,
 )
 from modules.analytics import analyze_attempt_performance, get_student_history
 from modules.mock_generator import generate_mock_paper
-from modules.backtester import run_historical_backtest
+from modules.backtester import run_historical_backtest, run_rolling_backtest
 from modules.exporter import export_predictions_pdf
+from modules.dashboard import get_overview_stats
+from modules.mcq_builder import generate_mcqs_for_subject
+from modules.preprocess import preprocess_page_image
+from modules.ui_helpers import safe, empty_state
 
 # 1. Page Configuration
 st.set_page_config(
@@ -80,10 +88,10 @@ div.stButton > button.tag-btn-active {
 div[class*="st-key-tag_inact_"] button,
 div[class*="st-key-btn_tag_inactive"] button,
 div.stButton > button.tag-btn-inactive {
-    background-color: #f8f9fa !important;
-    color: #495057 !important;
+    background-color: rgba(128, 128, 128, 0.10) !important;
+    color: inherit !important;
     font-weight: 500 !important;
-    border: 1px solid #ced4da !important;
+    border: 1px solid rgba(128, 128, 128, 0.35) !important;
     border-radius: 20px !important;
 }
 
@@ -95,42 +103,43 @@ div.stButton > button.tag-btn-inactive:hover {
 
 /* Card Styling */
 .metric-card {
-    background: #ffffff;
-    border: 1px solid #e9ecef;
+    background: rgba(128, 128, 128, 0.10);
+    border: 1px solid rgba(128, 128, 128, 0.35);
     border-radius: 10px;
     padding: 16px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.04);
+    color: inherit;
 }
 
 .disclaimer-banner {
-    background-color: #fff3cd;
-    color: #856404;
+    background-color: rgba(255, 193, 7, 0.15);
+    color: inherit;
     padding: 10px 16px;
     border-radius: 6px;
-    border-left: 5px solid #ffeeba;
+    border-left: 5px solid #ffc107;
     font-size: 0.88rem;
     margin-bottom: 20px;
 }
 
 .badge-high {
-    background-color: #d4edda;
-    color: #155724;
+    background-color: rgba(40, 167, 69, 0.20);
+    color: #28a745;
     padding: 4px 10px;
     border-radius: 12px;
     font-weight: bold;
     font-size: 0.85rem;
 }
 .badge-med {
-    background-color: #fff3cd;
-    color: #856404;
+    background-color: rgba(255, 193, 7, 0.20);
+    color: #ffc107;
     padding: 4px 10px;
     border-radius: 12px;
     font-weight: bold;
     font-size: 0.85rem;
 }
 .badge-low {
-    background-color: #e2e3e5;
-    color: #383d41;
+    background-color: rgba(128, 128, 128, 0.20);
+    color: inherit;
+    opacity: 0.8;
     padding: 4px 10px;
     border-radius: 12px;
     font-weight: bold;
@@ -164,6 +173,7 @@ with st.sidebar:
     has_admin_priv = is_admin(current_email)
 
     menu_options = [
+        "🏠 Overview Dashboard",
         "📊 Predictions & Likelihood",
         "📝 Practice Quiz & MCQ Bank",
         "📈 Diagnostic Report & Progress",
@@ -182,15 +192,94 @@ with st.sidebar:
     st.session_state.nav_selection = selected_page
 
 # ==============================================================================
+# VIEW 0: OVERVIEW DASHBOARD
+# ==============================================================================
+if selected_page == "🏠 Overview Dashboard":
+    st.title("🏠 Examination Analytics & Overview Dashboard")
+    render_disclaimer()
+
+    subjects = get_all_subjects()
+    if not subjects:
+        empty_state("No examination papers or subjects have been ingested yet. Please use the Admin Portal to upload papers.")
+        st.stop()
+
+    subj_options = {"All Subjects": None}
+    for s in subjects:
+        subj_options[f"{s['name']} ({s.get('code') or 'General'})"] = s["id"]
+
+    sel_sub_label = st.selectbox("Scope Dashboard", list(subj_options.keys()))
+    sel_sub_id = subj_options[sel_sub_label]
+
+    stats = get_overview_stats(sel_sub_id)
+
+    # 4 Metric Cards
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Papers Loaded", stats["papers_count"])
+    c2.metric("Questions Extracted", stats["questions_count"])
+    c3.metric("Years Covered", stats["distinct_years_count"])
+    c4.metric("Verified MCQs", stats["mcqs_verified"])
+
+    st.markdown("---")
+    ch_col1, ch_col2 = st.columns(2)
+    with ch_col1:
+        st.subheader("📊 Average Question Likelihood per Unit")
+        if stats["unit_avg_likelihood"]:
+            df_lik = pd.DataFrame(
+                list(stats["unit_avg_likelihood"].items()),
+                columns=["Unit", "Average Likelihood (%)"],
+            ).set_index("Unit")
+            st.bar_chart(df_lik)
+        else:
+            st.info("No likelihood predictions computed yet.")
+
+    with ch_col2:
+        st.subheader("📚 Questions per Syllabus Unit")
+        if stats["questions_per_unit"]:
+            df_q = pd.DataFrame(
+                list(stats["questions_per_unit"].items()),
+                columns=["Unit", "Question Count"],
+            ).set_index("Unit")
+            st.bar_chart(df_q)
+        else:
+            st.info("No unit question counts available.")
+
+    st.markdown("---")
+    st.subheader("🔥 Top 5 High-Likelihood Exam Questions")
+    if stats["top_predictions"]:
+        for p in stats["top_predictions"]:
+            badge_cls = "badge-high" if p["likelihood"] == "High" else ("badge-med" if p["likelihood"] == "Medium" else "badge-low")
+            years_str = safe(", ".join(map(str, p["years_appeared"])))
+            st.markdown(
+                f"""
+                <div style="background-color: rgba(128,128,128,0.10); border: 1px solid rgba(128,128,128,0.35); border-radius: 8px; padding: 14px; margin-bottom: 12px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        <span style="font-weight: 600; font-size: 1.05rem;">Unit {p['unit']} | {safe(p['topic'])} ({p['avg_marks']} Marks)</span>
+                        <span class="{badge_cls}">{safe(p['likelihood'])} ({p['final_score']}%)</span>
+                    </div>
+                    <p style="font-size: 1rem; color: inherit; margin-bottom: 8px;">{safe(p['question_text'])}</p>
+                    <div style="font-size: 0.85rem; opacity: 0.7;">
+                        🗓️ <b>Appeared in:</b> {years_str} (Total: {p['appearances_count']} times) | 
+                        ⏳ <b>Gap:</b> {p['gap_years']} yrs | 
+                        📊 <b>Freq:</b> {p['frequency_score']}% | <b>Recency:</b> {p['recency_score']}%
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+    else:
+        empty_state("No predicted questions available for display.")
+
+
+# ==============================================================================
 # VIEW 1: PREDICTIONS & LIKELIHOOD DASHBOARD
 # ==============================================================================
-if selected_page == "📊 Predictions & Likelihood":
+elif selected_page == "📊 Predictions & Likelihood":
     st.title("📊 Question Repetition & Exam Likelihood Engine")
     render_disclaimer()
 
     subjects = get_all_subjects()
     if not subjects:
-        st.info("No subjects or question papers have been ingested yet. Please contact the administrator or add papers via the Admin Portal.")
+        empty_state("No subjects or question papers have been ingested yet. Please contact the administrator or add papers via the Admin Portal.")
         st.stop()
 
     subj_map = {s["name"]: s["id"] for s in subjects}
@@ -216,6 +305,11 @@ if selected_page == "📊 Predictions & Likelihood":
         st.warning("No questions match the current filters. Ingest additional past papers to view predictions.")
         st.stop()
 
+    # Low data warning check
+    if any(p.get("low_data_warning") for p in predictions):
+        n_yrs = predictions[0].get("data_years", 1)
+        st.warning(f"⚠️ Only {n_yrs} year(s) of papers loaded — predictions are indicative. Load 3+ years for reliable scores.")
+
     # Metric summaries
     high_count = sum(1 for p in predictions if p["likelihood"] == "High")
     med_count = sum(1 for p in predictions if p["likelihood"] == "Medium")
@@ -227,13 +321,52 @@ if selected_page == "📊 Predictions & Likelihood":
     col_m3.metric("Medium Likelihood (45-69%)", med_count)
     col_m4.metric("Low Likelihood (<45%)", low_count)
 
+    # Expander explaining the prediction formulas
+    with st.expander("ℹ️ How predictions work"):
+        st.markdown(
+            """
+            **Deterministic Multi-Factor Scoring Formula:**
+            $$\\text{Final Score} = (0.35 \\times \\hat{F}) + (0.30 \\times \\hat{R}) + (0.20 \\times \\hat{G}) + (0.15 \\times \\hat{M})$$
+
+            - **Frequency Weight ($w_f = 0.35$):** Distinct examination years the question appeared divided by total historical years examined.
+            - **Recency Decay Weight ($w_r = 0.30$):** Exponential recency decay $\\sum e^{-0.3 \\times (\\text{current\\_year} - y)}$ with decay constant $\\lambda = 0.3$.
+            - **Gap Cycle Weight ($w_g = 0.20$):** Cyclical repeat probability based on elapsed years since last appearance:
+              - **Gap = 1 year:** $0.40$ (often rotated out)
+              - **Gap = 2 years:** $1.00$ (highest historical repeat cycle)
+              - **Gap = 3 years:** $0.85$ (medium-high recurrence)
+              - **Gap $\\ge$ 4 years:** $0.50$ (long-tail rotation)
+            - **Marks Weight ($w_m = 0.15$):** Normalized syllabus importance based on maximum marks observed.
+            """
+        )
+
     st.markdown("---")
     
-    col_act1, col_act2 = st.columns([3, 1])
+    col_act1, col_act2, col_act3 = st.columns([2, 1, 1])
     with col_act1:
         search_query = st.text_input("🔍 Search predicted questions by keyword", "")
     with col_act2:
-        if st.button("📥 Export Study Sheet (PDF)", use_container_width=True):
+        df_csv = pd.DataFrame([
+            {
+                "rank": idx + 1,
+                "question_text": p["question_text"],
+                "unit": p["unit"],
+                "topic": p["topic"],
+                "likelihood": p["likelihood"],
+                "final_score": p["final_score"],
+                "appearances_count": p["appearances_count"],
+                "years_appeared": ", ".join(map(str, p["years_appeared"])),
+            }
+            for idx, p in enumerate(predictions)
+        ])
+        st.download_button(
+            label="📊 Download CSV",
+            data=df_csv.to_csv(index=False),
+            file_name=f"{chosen_subj_name}_predictions.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+    with col_act3:
+        if st.button("📥 Export Study PDF", use_container_width=True):
             pdf_path = export_predictions_pdf(chosen_subj_name, predictions)
             with open(pdf_path, "rb") as f:
                 st.download_button(
@@ -251,26 +384,39 @@ if selected_page == "📊 Predictions & Likelihood":
     # Display Predictions
     for p in filtered_preds:
         badge_cls = "badge-high" if p["likelihood"] == "High" else ("badge-med" if p["likelihood"] == "Medium" else "badge-low")
-        years_str = ", ".join(map(str, p["years_appeared"]))
+        years_str = safe(", ".join(map(str, p["years_appeared"])))
+        c_contrib = p.get("contributions", {"frequency": 0, "recency": 0, "gap": 0, "marks": 0})
 
         with st.container():
-            st.markdown(
-                f"""
-                <div style="background-color: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; padding: 14px; margin-bottom: 12px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                        <span style="font-weight: 600; font-size: 1.05rem;">Unit {p['unit']} | {p['topic']} ({p['avg_marks']} Marks)</span>
-                        <span class="{badge_cls}">{p['likelihood']} Likelihood ({p['final_score']}%)</span>
-                    </div>
-                    <p style="font-size: 1rem; color: #212529; margin-bottom: 8px;">{p['question_text']}</p>
-                    <div style="font-size: 0.85rem; color: #6c757d;">
-                        🗓️ <b>Appeared in:</b> {years_str} (Total: {p['appearances_count']} times) | 
-                        ⏳ <b>Gap:</b> {p['gap_years']} yrs | 
-                        📊 <b>Freq Score:</b> {p['frequency_score']}% | <b>Recency:</b> {p['recency_score']}%
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
+            card_html = (
+                f'<div style="background-color: rgba(128,128,128,0.10); border: 1px solid rgba(128,128,128,0.35); border-radius: 8px; padding: 14px; margin-bottom: 12px;">'
+                f'<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">'
+                f'<span style="font-weight: 600; font-size: 1.05rem;">Unit {p["unit"]} | {safe(p["topic"])} ({p["avg_marks"]} Marks)</span>'
+                f'<span class="{badge_cls}">{safe(p["likelihood"])} ({p["final_score"]}%)</span>'
+                f'</div>'
+                f'<p style="font-size: 1rem; color: inherit; margin-bottom: 8px;">{safe(p["question_text"])}</p>'
+                f'<div style="margin: 8px 0;">'
+                f'<div style="display: flex; width: 100%; height: 8px; border-radius: 4px; overflow: hidden; background: rgba(128,128,128,0.25);">'
+                f'<div style="width: {c_contrib["frequency"]}%; background: #007bff;" title="Frequency: {c_contrib["frequency"]}%"></div>'
+                f'<div style="width: {c_contrib["recency"]}%; background: #28a745;" title="Recency: {c_contrib["recency"]}%"></div>'
+                f'<div style="width: {c_contrib["gap"]}%; background: #ffc107;" title="Gap: {c_contrib["gap"]}%"></div>'
+                f'<div style="width: {c_contrib["marks"]}%; background: #fd7e14;" title="Marks: {c_contrib["marks"]}%"></div>'
+                f'</div>'
+                f'<div style="display: flex; gap: 15px; font-size: 0.75rem; margin-top: 4px; opacity: 0.75;">'
+                f'<span>🔵 Freq: {c_contrib["frequency"]}%</span>'
+                f'<span>🟢 Recency: {c_contrib["recency"]}%</span>'
+                f'<span>🟡 Gap: {c_contrib["gap"]}%</span>'
+                f'<span>🟠 Marks: {c_contrib["marks"]}%</span>'
+                f'</div>'
+                f'</div>'
+                f'<div style="font-size: 0.85rem; opacity: 0.7; margin-top: 6px;">'
+                f'🗓️ <b>Appeared in:</b> {years_str} (Total: {p["appearances_count"]} times) | '
+                f'⏳ <b>Gap:</b> {p["gap_years"]} yrs | '
+                f'📊 <b>Freq Score:</b> {p["frequency_score"]}% | <b>Recency:</b> {p["recency_score"]}%'
+                f'</div>'
+                f'</div>'
             )
+            st.markdown(card_html, unsafe_allow_html=True)
             if p["image_path"] and os.path.exists(p["image_path"]):
                 st.image(p["image_path"], caption=f"Original Exam Question Snippet (Cluster #{p['cluster_id']})", use_container_width=True)
 
@@ -307,6 +453,7 @@ elif selected_page == "📝 Practice Quiz & MCQ Bank":
         with c5:
             q_text_only = st.checkbox("Text-only Questions (exclude diagrams)", value=False)
 
+        student_email = get_current_user_email()
         if st.button("🚀 Start Quiz", type="primary", use_container_width=True):
             if not q_subj_id:
                 st.error("Please select a valid subject.")
@@ -317,12 +464,14 @@ elif selected_page == "📝 Practice Quiz & MCQ Bank":
                 units=q_units,
                 text_only=q_text_only,
                 limit=q_num_items,
+                student_id=student_email if student_email else None,
             )
             if not items:
                 st.error("No questions found matching your filter criteria. Please widen your syllabus unit selection.")
             else:
                 init_quiz_session(items)
                 st.session_state.active_quiz_subject_id = q_subj_id
+                st.session_state.quiz_checked = {}
                 st.rerun()
 
     else:
@@ -332,13 +481,14 @@ elif selected_page == "📝 Practice Quiz & MCQ Bank":
         total = len(questions)
         q = questions[idx]
 
-        st.progress((idx + 1) / total, text=f"Question {idx + 1} of {total}")
+        st.progress((idx) / total)
+        st.caption(f"Question {idx + 1} of {total}")
 
         st.markdown(
             f"""
-            <div style="background-color: #f8f9fa; border-left: 5px solid #28a745; padding: 14px; border-radius: 4px; margin-bottom: 15px;">
-                <span style="font-size: 0.9rem; color: #6c757d;">Unit {q['unit']} | {q['topic']} | Marks: {q['marks']}</span>
-                <h4 style="margin-top: 5px;">{q['question_text']}</h4>
+            <div style="background-color: rgba(128,128,128,0.10); border-left: 5px solid #28a745; padding: 14px; border-radius: 4px; margin-bottom: 15px;">
+                <span style="font-size: 0.9rem; opacity: 0.7;">Unit {q['unit']} | {safe(q['topic'])} | Marks: {q['marks']}</span>
+                <h4 style="margin-top: 5px; color: inherit;">{safe(q['question_text'])}</h4>
             </div>
             """,
             unsafe_allow_html=True,
@@ -346,6 +496,10 @@ elif selected_page == "📝 Practice Quiz & MCQ Bank":
 
         if q["image_path"] and os.path.exists(q["image_path"]):
             st.image(q["image_path"], caption="Original Question Snippet (Formulas, Symbols & Diagrams)", use_container_width=True)
+
+        # Elapsed question timer
+        elapsed_sec = int(time.time() - st.session_state.get("quiz_q_start_time", time.time()))
+        st.caption(f"⏱️ Time on this question: {elapsed_sec}s")
 
         # 5 Options including "Not in my syllabus / Skip"
         option_choices = [
@@ -370,6 +524,33 @@ elif selected_page == "📝 Practice Quiz & MCQ Bank":
             key=f"q_radio_{idx}",
         )
 
+        # Check answer interactive functionality
+        if "quiz_checked" not in st.session_state:
+            st.session_state.quiz_checked = {}
+        is_checked = st.session_state.quiz_checked.get(idx, False)
+
+        c_chk, _ = st.columns([1, 2])
+        with c_chk:
+            if st.button("🔍 Check Answer", key=f"btn_chk_{idx}", disabled=is_checked, use_container_width=True):
+                if selected_radio:
+                    st.session_state.quiz_checked[idx] = True
+                    st.rerun()
+                else:
+                    st.warning("Please choose an option first.")
+
+        if is_checked:
+            chosen_opt = (selected_radio[0] if selected_radio else "")
+            if chosen_opt == q["correct_option"]:
+                st.success("✅ **Correct!** Excellent work.")
+            elif chosen_opt == "E":
+                st.info("⚪ Question marked as out of syllabus (skipped).")
+            else:
+                st.error(f"❌ **Incorrect.** Correct answer is **Option {q['correct_option']}**.")
+            st.info(f"💡 **Explanation:** {safe(q['explanation'])}")
+
+        # Next / Finish is enabled after the answer is checked OR option E (skip) is chosen
+        can_proceed = is_checked or (selected_radio is not None and selected_radio.startswith("E"))
+
         col_nav1, col_nav2 = st.columns([1, 1])
         with col_nav1:
             if idx > 0:
@@ -379,7 +560,7 @@ elif selected_page == "📝 Practice Quiz & MCQ Bank":
 
         with col_nav2:
             button_label = "Finish & Submit Quiz" if (idx == total - 1) else "Next Question ➡️"
-            if st.button(button_label, type="primary", use_container_width=True):
+            if st.button(button_label, type="primary", use_container_width=True, disabled=not can_proceed):
                 if selected_radio:
                     chosen_letter = selected_radio[0]
                     elapsed = time.time() - st.session_state.quiz_q_start_time
@@ -389,7 +570,11 @@ elif selected_page == "📝 Practice Quiz & MCQ Bank":
                     }
 
                 if idx == total - 1:
-                    student_id = get_current_user_email() or "guest_student"
+                    student_email = get_current_user_email()
+                    if not student_email:
+                        st.error("Please sign in or register with your student account in the sidebar to submit quiz attempts.")
+                        st.stop()
+                    student_id = student_email
                     subj_id = st.session_state.get("active_quiz_subject_id", 1)
                     attempt_id = submit_quiz_attempt(student_id, subj_id)
                     st.session_state.last_attempt_id = attempt_id
@@ -408,18 +593,26 @@ elif selected_page == "📈 Diagnostic Report & Progress":
     st.title("📈 Student Diagnostic Report & Weakness Matrix")
     render_disclaimer()
 
+    student_email = get_current_user_email()
+    if not student_email:
+        empty_state("Please sign in or register with your student account in the sidebar to view your diagnostic report and progress history.")
+        st.stop()
+    student_id = student_email
+
     last_attempt_id = st.session_state.get("last_attempt_id")
-    student_id = get_current_user_email() or "guest_student"
+    history = get_student_history(student_id)
 
     if not last_attempt_id:
-        history = get_student_history(student_id)
         if history:
             last_attempt_id = history[0]["id"]
         else:
-            st.info("No completed quiz attempts found. Please complete a practice quiz first.")
+            empty_state("No completed quiz attempts found for this account. Please complete a practice quiz first.")
             st.stop()
 
     report = analyze_attempt_performance(last_attempt_id)
+    if "error" in report:
+        st.error(report["error"])
+        st.stop()
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Overall Score", f"{report['score_percent']}%")
@@ -429,42 +622,77 @@ elif selected_page == "📈 Diagnostic Report & Progress":
 
     st.markdown("---")
     
+    # Progress line chart across attempts
+    if history and len(history) > 1:
+        st.subheader("📈 Score Progression Across Attempts")
+        df_hist = pd.DataFrame([
+            {"Attempt": f"#{h['id']} ({str(h['created_at'])[:10]})", "Score (%)": h["score"]}
+            for h in reversed(history)
+        ]).set_index("Attempt")
+        st.line_chart(df_hist)
+
     # Strengths and Weaknesses
     c_str, c_wk = st.columns(2)
     with c_str:
         st.success("🌟 **Strong Knowledge Areas:**")
         if report["strengths"]:
             for s in report["strengths"]:
-                st.markdown(f"- ✅ **{s}**")
+                st.markdown(f"- ✅ **{safe(s)}**")
         else:
-            st.write("Complete more questions to establish strong topics.")
+            st.write("Complete more questions correctly to establish verified strengths.")
 
     with c_wk:
         st.error("⚠️ **High Priority Revision Areas:**")
         if report["weaknesses"]:
             for w in report["weaknesses"]:
-                st.markdown(f"- 🚩 **{w}**")
+                st.markdown(f"- 🚩 **{safe(w)}**")
         else:
-            st.write("No major weak spots detected!")
+            st.write("No critical weak spots detected!")
 
     st.markdown("### 🎯 Revision Priority Matrix (Weakness × Exam Likelihood)")
     st.write("This matrix weights the concepts you missed by how likely they are to appear on the exam:")
 
-    df_topics = pd.DataFrame(report["topic_summary"])
-    if not df_topics.empty:
-        st.dataframe(
-            df_topics[[
-                "topic", "unit", "total_attempted", "correct",
-                "accuracy", "avg_likelihood", "priority_score", "recommended_book"
-            ]],
-            use_container_width=True,
-        )
+    # Topic Accuracy vs Priority Bar Chart
+    active_topics = [t for t in report["topic_summary"] if not t.get("all_skipped")]
+    if active_topics:
+        df_bar = pd.DataFrame([
+            {
+                "Topic": t["topic"],
+                "Accuracy (%)": (t["accuracy"] if t["accuracy"] is not None else 0.0),
+                "Priority Score": t["priority_score"],
+            }
+            for t in active_topics
+        ]).set_index("Topic")
+        st.bar_chart(df_bar)
+
+    if report["topic_summary"]:
+        df_topics_disp = pd.DataFrame([
+            {
+                "Topic": t["topic"],
+                "Unit": t["unit"],
+                "Attempted": t["total_attempted"],
+                "Correct": t["correct"],
+                "Accuracy": f"{t['accuracy']}%" if t["accuracy"] is not None else "—",
+                "Priority Score": t["priority_score"],
+                "Average Likelihood": f"{t['avg_likelihood']}%",
+                "Recommended Book": t["recommended_book"],
+            }
+            for t in report["topic_summary"]
+        ])
+        st.dataframe(df_topics_disp, use_container_width=True)
+
+    # Skipped Topics Section (Skips never penalise)
+    if report.get("skipped_topics"):
+        st.markdown("#### 🚫 Marked as not in my syllabus")
+        st.caption("These topics were marked as skipped in your quiz attempt and are excluded from accuracy penalties:")
+        for sk_t in report["skipped_topics"]:
+            st.markdown(f"- ⚪ **{safe(sk_t)}**")
 
     # Mistakes Review
     if report["mistakes"]:
         st.markdown("### 🔍 Mistakes Breakdown & Recommended Correction")
         for m in report["mistakes"]:
-            with st.expander(f"❌ Question {m['question_number']} ({m['topic']})"):
+            with st.expander(f"❌ Question {safe(m['question_number'])} ({safe(m['topic'])})"):
                 st.write(f"**Question:** {m['question_text']}")
                 st.write(f"**Your Answer:** Option {m['selected_option']}")
                 st.write(f"**Correct Answer:** Option {m['correct_option']}")
@@ -475,37 +703,19 @@ elif selected_page == "📈 Diagnostic Report & Progress":
         st.markdown("---")
         if st.button("🔁 Launch 1-Click Remedial Quiz (Retry Failed Questions Only)", type="primary"):
             failed_q_ids = [m["question_id"] for m in report["mistakes"]]
-            with get_db_connection() as conn:
-                cursor = conn.cursor()
-                placeholders = ",".join(["?"] * len(failed_q_ids))
-                cursor.execute(f"SELECT * FROM questions WHERE id IN ({placeholders});", tuple(failed_q_ids))
-                rem_questions = [dict(r) for r in cursor.fetchall()]
+            rem_items = load_questions_by_ids(failed_q_ids)
+            if len(rem_items) < len(failed_q_ids):
+                active_subj = st.session_state.get("active_quiz_subject_id", 1)
+                generate_mcqs_for_subject(active_subj)
+                rem_items = load_questions_by_ids(failed_q_ids)
 
-            formatted = []
-            for r in rem_questions:
-                formatted.append({
-                    "question_id": r["id"],
-                    "question_number": r["question_number"],
-                    "question_text": r["question_text"],
-                    "content_type": r["content_type"],
-                    "image_path": r["image_path"],
-                    "marks": r["marks"],
-                    "unit": r["unit"],
-                    "topic": r["topic"],
-                    "options": {
-                        "A": "Primary analytical rule",
-                        "B": "Secondary implementation rule",
-                        "C": "Neither condition",
-                        "D": "Both conditions apply",
-                        "E": "🚫 Not in my syllabus / Skip",
-                    },
-                    "correct_option": "A",
-                    "explanation": f"Reviewing mistake for question {r['question_number']}.",
-                })
-
-            init_quiz_session(formatted)
-            st.session_state.selected_page = "📝 Practice Quiz & MCQ Bank"
-            st.rerun()
+            if rem_items:
+                init_quiz_session(rem_items)
+                st.session_state.quiz_checked = {}
+                st.session_state.nav_selection = "📝 Practice Quiz & MCQ Bank"
+                st.rerun()
+            else:
+                st.error("Unable to load remedial questions.")
 
 
 # ==============================================================================
@@ -517,7 +727,7 @@ elif selected_page == "📑 Mock Exam Generator":
 
     subjects = get_all_subjects()
     if not subjects:
-        st.info("No subjects available.")
+        empty_state("No subjects available. Ingest examination papers in the Admin Portal first.")
         st.stop()
 
     subj_map = {s["name"]: s["id"] for s in subjects}
@@ -542,37 +752,41 @@ elif selected_page == "📑 Mock Exam Generator":
     if "current_mock_paper" in st.session_state:
         paper = st.session_state.current_mock_paper
         st.markdown("---")
-        
+
+        # Warnings if any
+        if paper.get("warnings"):
+            for w in paper["warnings"]:
+                st.warning(f"⚠️ {safe(w)}")
+
         # Examination Header
+        dept_str = safe(paper.get("department") or "EXAMINATION")
         st.markdown(
             f"""
-            <div style="text-align: center; border: 2px solid #333; padding: 20px; border-radius: 6px; background-color: #fafafa; margin-bottom: 25px;">
-                <h2 style="margin: 0;">DEPARTMENT OF COMPUTER SCIENCE & ENGINEERING</h2>
-                <h4 style="margin: 5px 0;">{paper['exam_type']} EXAMINATION - SIMULATED PATTERN</h4>
-                <p><b>Subject:</b> {paper['subject_name']} ({paper['subject_code']}) | <b>Max Marks:</b> {paper['total_marks']}</p>
+            <div style="text-align: center; border: 1px solid rgba(128,128,128,0.35); padding: 20px; border-radius: 8px; background-color: rgba(128,128,128,0.08); margin-bottom: 25px;">
+                <h3 style="margin: 0; color: inherit;">{dept_str}</h3>
+                <h4 style="margin: 5px 0; color: inherit;">{safe(paper['exam_type'])} EXAMINATION — SIMULATED PATTERN</h4>
+                <p style="margin: 5px 0; opacity: 0.8;"><b>Subject:</b> {safe(paper['subject_name'])} ({safe(paper['subject_code'])}) | <b>Max Marks:</b> {paper['total_marks']}</p>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
         for sec in paper["sections"]:
-            st.markdown(f"### {sec['section_name']}")
-            st.markdown(f"*{sec['instructions']}*")
+            st.markdown(f"### {safe(sec['section_name'])}")
+            st.markdown(f"*{safe(sec['instructions'])}*")
             for q in sec["questions"]:
-                st.markdown(
-                    f"""
-                    <div style="display: flex; justify-content: space-between; border-bottom: 1px dotted #ccc; padding: 8px 0;">
-                        <div>
-                            <b>{q['q_num']}.</b> {q['text']} 
-                            <span style="font-size: 0.8rem; color: #6c757d;">(Unit {q['unit']} | Likelihood: {q['likelihood']})</span>
-                        </div>
-                        <div style="font-weight: bold; min-width: 60px; text-align: right;">[{int(q['marks'])} M]</div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
+                q_row_html = (
+                    f'<div style="display: flex; justify-content: space-between; border-bottom: 1px dotted rgba(128,128,128,0.35); padding: 8px 0; margin-top: 10px;">'
+                    f'<div>'
+                    f'<b>{safe(q["q_num"])}.</b> {safe(q["text"])} '
+                    f'<span style="font-size: 0.8rem; opacity: 0.7;">(Unit {q["unit"]} | Likelihood: {safe(q["likelihood"])})</span>'
+                    f'</div>'
+                    f'<div style="font-weight: bold; min-width: 60px; text-align: right;">[{int(q["marks"])} M]</div>'
+                    f'</div>'
                 )
+                st.markdown(q_row_html, unsafe_allow_html=True)
                 if q["image_path"] and os.path.exists(q["image_path"]):
-                    st.image(q["image_path"], width=250)
+                    st.image(q["image_path"], use_container_width=True)
 
 
 # ==============================================================================
@@ -586,49 +800,77 @@ elif selected_page == "🔬 Back-Testing Lab Engine":
         """
         **Scientific Validation for Lab Presentation:**
         This module hides an actual past exam year (Year $T$), trains the heuristic scoring engine 
-        strictly on prior years ($T-5$ to $T-1$), and objectively measures the hit-rate of predicted questions 
+        strictly on prior years (Years $< T$), and objectively measures the hit-rate of predicted questions 
         against the questions that actually appeared on that year's paper.
         """
     )
 
     subjects = get_all_subjects()
     if not subjects:
-        st.info("No subjects available.")
+        empty_state("No subjects available for back-testing.")
         st.stop()
 
     subj_map = {s["name"]: s["id"] for s in subjects}
 
-    col1, col2 = st.columns(2)
+    col1, _ = st.columns([2, 2])
     with col1:
-        bt_subj_name = st.selectbox("Select Subject", list(subj_map.keys()))
+        bt_subj_name = st.selectbox("Select Subject", list(subj_map.keys()), key="bt_subj_select")
         bt_subj_id = subj_map.get(bt_subj_name)
-    with col2:
-        test_year = st.number_input("Test Year to Simulate (Target Year)", min_value=2018, max_value=2026, value=2024)
 
-    if st.button("🚀 Execute Back-Test Simulation", type="primary", use_container_width=True):
-        if not bt_subj_id:
-            st.error("Please select a subject.")
-            st.stop()
-        with st.spinner("Simulating past paper predictions..."):
-            results = run_historical_backtest(bt_subj_id, int(test_year))
+    if not bt_subj_id:
+        st.stop()
 
-        if not results["success"]:
-            st.error(results["message"])
-        else:
-            col_res1, col_res2, col_res3 = st.columns(3)
-            col_res1.metric("Empirical Hit-Rate", f"{results['hit_rate']}%")
-            col_res2.metric("Total Actual Questions in Paper", results["total_actual"])
-            col_res3.metric("Verified Prediction Hits", results["hits_count"])
+    # Query distinct years available for this subject
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT DISTINCT year FROM papers WHERE subject_id = ? AND year IS NOT NULL ORDER BY year ASC;",
+            (bt_subj_id,),
+        )
+        avail_years = [r[0] for r in cursor.fetchall()]
 
-            st.markdown("### 🎯 Verified Match Breakdown")
-            if results["matched_pairs"]:
-                df_hits = pd.DataFrame(results["matched_pairs"])
-                st.dataframe(
-                    df_hits[["actual_question", "predicted_question", "similarity", "predicted_score", "marks"]],
-                    use_container_width=True,
-                )
+    if len(avail_years) < 2:
+        loaded_str = ", ".join(map(str, avail_years)) if avail_years else "None"
+        st.info(f"Back-testing needs at least 2 years of papers for this subject. Currently loaded: {loaded_str}")
+    else:
+        # Rolling back-test comparison
+        rolling_results = run_rolling_backtest(bt_subj_id)
+        if rolling_results:
+            st.subheader("📈 Rolling Back-Test Hit Rate vs. Recency Baseline")
+            df_roll = pd.DataFrame(rolling_results).set_index("test_year")
+            st.line_chart(df_roll[["hit_rate", "recency_baseline_hit_rate"]])
+            st.caption("Empirical hit rate of multi-factor heuristics compared to naive most-recent appearance baseline.")
+
+        st.markdown("---")
+        st.subheader("🔎 Single-Year Detailed Simulation")
+        test_year_cands = avail_years[1:]  # Needs at least 1 earlier year
+        test_year = st.selectbox("Select Target Year to Simulate", test_year_cands, index=len(test_year_cands) - 1, key="bt_test_year")
+
+        if st.button("🚀 Execute Back-Test Simulation", type="primary", use_container_width=True):
+            with st.spinner("Simulating past paper predictions..."):
+                results = run_historical_backtest(bt_subj_id, int(test_year))
+
+            if not results["success"]:
+                st.error(results["message"])
             else:
-                st.info("No questions from the top percentile matched this year's paper.")
+                c_res1, c_res2, c_res3, c_res4 = st.columns(4)
+                c_res1.metric("Heuristic Hit-Rate", f"{results['hit_rate']}%")
+                c_res2.metric("Recency Baseline", f"{results['recency_baseline_hit_rate']}%")
+                c_res3.metric("Actual Paper Questions", results["total_actual"])
+                c_res4.metric("Verified Hits", results["hits_count"])
+
+                train_yrs_str = ", ".join(map(str, results.get("train_years", [])))
+                st.caption(f"Training papers strictly used (years < {test_year}): {train_yrs_str}")
+
+                st.markdown("### 🎯 Verified Match Breakdown")
+                if results["matched_pairs"]:
+                    df_hits = pd.DataFrame(results["matched_pairs"])
+                    st.dataframe(
+                        df_hits[["actual_question", "predicted_question", "similarity", "predicted_score", "marks"]],
+                        use_container_width=True,
+                    )
+                else:
+                    st.info("No questions from the top percentile matched this year's paper.")
 
 
 # ==============================================================================
@@ -641,8 +883,9 @@ elif selected_page == "🛡️ Admin Management Portal":
     st.title("🛡️ Administrator Management Portal")
     render_disclaimer()
 
-    tab_ingest, tab_review, tab_mcqs, tab_edit, tab_tags, tab_manage, tab_db = st.tabs([
+    tab_ingest, tab_inspect, tab_review, tab_mcqs, tab_edit, tab_tags, tab_manage, tab_db = st.tabs([
         "📥 Ingest Question Papers",
+        "🔍 Pipeline Inspector",
         "🔍 Low-Confidence Review Queue",
         "📝 MCQ Bank Verification",
         "✏️ Edit Subjects, Papers & Questions",
@@ -682,12 +925,10 @@ elif selected_page == "🛡️ Admin Management Portal":
                 st.info(f"Loaded: **{uploaded_combined.name}** ({round(len(comb_bytes)/(1024*1024), 2)} MB)")
 
                 if st.button("🚀 Run Auto-Segregation & Ingestion", type="primary", key="btn_run_autoseg"):
-                    progress_bar = st.progress(0, text="Initializing auto-segregation pipeline...")
-                    
-                    def on_progress(curr, total, msg):
-                        progress_bar.progress(int((curr / total) * 100), text=msg)
+                    with st.status("Processing document: Deskewing, illumination flattening, boundary detection & OCR...", expanded=True) as status:
+                        def on_progress(msg, pct):
+                            status.write(f"🔄 **{msg}** ({int(pct * 100)}%)")
 
-                    with st.spinner("Processing document: Deskewing, illumination flattening, boundary detection & OCR..."):
                         success, msg, summary = ingest_combined_pdf(
                             file_bytes=comb_bytes,
                             original_filename=uploaded_combined.name,
@@ -695,31 +936,32 @@ elif selected_page == "🛡️ Admin Management Portal":
                             progress_callback=on_progress,
                         )
 
-                    progress_bar.progress(100, text="Complete!")
-                    if success:
-                        st.success(msg)
-                        st.markdown("### 📋 Detected Examination Papers")
-                        
-                        for p in summary:
-                            with st.container():
-                                c_th, c_info = st.columns([1, 3])
-                                with c_th:
-                                    if p.get("thumbnail_path") and os.path.exists(p["thumbnail_path"]):
-                                        st.image(p["thumbnail_path"], caption=f"Pages {p['page_range']}", use_container_width=True)
-                                with c_info:
-                                    conf_val = p.get("metadata_confidence", 0.0)
-                                    badge_color = "green" if conf_val >= 0.85 else "orange"
-                                    st.markdown(f"#### {p.get('subject_name', 'Unknown Course')} (Paper ID #{p.get('paper_id')})")
-                                    st.markdown(
-                                        f"**Pages:** `{p['page_range']}` | "
-                                        f"**Confidence:** :{badge_color}[{int(conf_val*100)}%] | "
-                                        f"**Quality Score:** `{p.get('quality_score', 0.0)}` | "
-                                        f"**Status:** `{p.get('status', 'accepted')}`"
-                                    )
-                                    st.markdown(f"**Extracted Questions:** `{p.get('questions_count', 0)}` questions committed.")
-                                st.divider()
-                    else:
-                        st.error(msg)
+                        if success:
+                            status.update(label="Auto-segregation and ingestion complete!", state="complete", expanded=False)
+                            st.success(msg)
+                            st.markdown("### 📋 Detected Examination Papers")
+                            
+                            for p in summary:
+                                with st.container():
+                                    c_th, c_info = st.columns([1, 3])
+                                    with c_th:
+                                        if p.get("thumbnail_path") and os.path.exists(p["thumbnail_path"]):
+                                            st.image(p["thumbnail_path"], caption=f"Pages {p['page_range']}", use_container_width=True)
+                                    with c_info:
+                                        conf_val = p.get("metadata_confidence", 0.0)
+                                        badge_color = "green" if conf_val >= 0.85 else "orange"
+                                        st.markdown(f"#### {safe(p.get('subject_name', 'Unknown Course'))} (Paper ID #{p.get('paper_id')})")
+                                        st.markdown(
+                                            f"**Pages:** `{p['page_range']}` | "
+                                            f"**Confidence:** :{badge_color}[{int(conf_val*100)}%] | "
+                                            f"**Quality Score:** `{p.get('quality_score', 0.0)}` | "
+                                            f"**Status:** `{p.get('status', 'accepted')}`"
+                                        )
+                                        st.markdown(f"**Extracted Questions:** `{p.get('questions_count', 0)}` questions committed.")
+                                    st.divider()
+                        else:
+                            status.update(label="Ingestion failed", state="error", expanded=True)
+                            st.error(msg)
 
         else:
             st.markdown("#### ✍️ Manual Single Paper Intake")
@@ -762,17 +1004,20 @@ elif selected_page == "🛡️ Admin Management Portal":
                         if drive_url:
                             with st.spinner("Downloading from Drive via gdown..."):
                                 temp_dl = os.path.join("data", "temp_drive_paper.pdf")
-                                ok = download_drive_file(drive_url, temp_dl)
+                                ok, dl_msg = download_drive_file(drive_url, temp_dl)
                                 if ok:
                                     with open(temp_dl, "rb") as f:
                                         pdf_bytes = f.read()
                                     orig_filename = "drive_downloaded_paper.pdf"
                                     st.success("Document downloaded from Google Drive.")
                                 else:
-                                    st.error("Failed to download from Drive. Verify that link is public.")
+                                    st.error(f"Download failed: {dl_msg}")
 
                 if pdf_bytes and st.button("⚡ Run Extraction & Ingestion Pipeline", type="primary"):
-                    with st.spinner("Executing extraction, OCR check, diagram clustering, and heuristic scoring..."):
+                    with st.status("Executing extraction and ingestion pipeline...", expanded=True) as status:
+                        def on_manual_progress(msg, pct):
+                            status.write(f"🔄 **{msg}** ({int(pct * 100)}%)")
+
                         success, msg, summary = process_pdf_document(
                             file_bytes=pdf_bytes,
                             original_filename=orig_filename,
@@ -781,12 +1026,103 @@ elif selected_page == "🛡️ Admin Management Portal":
                             semester=int(in_sem),
                             exam_type=in_type,
                             actor_email=actor,
+                            progress_callback=on_manual_progress,
                         )
-                    if success:
-                        st.success(msg)
-                        st.json(summary)
-                    else:
-                        st.error(msg)
+                        if success:
+                            status.update(label="Manual ingestion completed!", state="complete", expanded=False)
+                            st.success(msg)
+                            st.json(summary)
+                        else:
+                            status.update(label="Manual ingestion failed", state="error", expanded=True)
+                            st.error(msg)
+
+    # SUB-TAB 2: PIPELINE INSPECTOR
+    with tab_inspect:
+        st.subheader("🔍 Computer Vision Pipeline Inspector")
+        st.caption("Inspect raw PDF page rendering, deskewing, shadow removal, and question bounding box overlays.")
+
+        all_papers_insp = get_all_papers_detailed()
+        if not all_papers_insp:
+            empty_state("No papers available to inspect.")
+        else:
+            paper_labels = {
+                f"Paper #{p['id']} - {p['subject_name']} ({p.get('year') or 'N/A'}, {p.get('exam_type') or 'N/A'})": p
+                for p in all_papers_insp if p.get("file_path") and os.path.exists(p["file_path"])
+            }
+            if not paper_labels:
+                empty_state("No physical PDF papers found in data/papers/.")
+            else:
+                sel_paper_label = st.selectbox("Select Paper to Inspect", list(paper_labels.keys()), key="inspect_paper_sel")
+                sel_p = paper_labels[sel_paper_label]
+                pdf_path = sel_p["file_path"]
+
+                doc = pymupdf.open(pdf_path)
+                total_pdf_pages = len(doc)
+                page_choice = st.slider("Select Page Number", min_value=1, max_value=max(1, total_pdf_pages), value=1, key="inspect_page_slider")
+                page = doc[page_choice - 1]
+
+                # Render at 110 DPI (~1.527 zoom)
+                zoom_factor = 110.0 / 72.0
+                mat = pymupdf.Matrix(zoom_factor, zoom_factor)
+                pix = page.get_pixmap(matrix=mat)
+                nparr = np.frombuffer(pix.samples, dtype=np.uint8).reshape((pix.height, pix.width, pix.n))
+                if pix.n >= 3:
+                    raw_bgr = cv2.cvtColor(nparr[:, :, :3], cv2.COLOR_RGB2BGR)
+                else:
+                    raw_bgr = cv2.cvtColor(nparr, cv2.COLOR_GRAY2BGR)
+                doc.close()
+
+                # Call preprocessing pipeline
+                prep_res = preprocess_page_image(raw_bgr)
+                clean_bgr = prep_res["clean_bgr"]
+
+                # Fetch bounding boxes for this paper and page
+                with get_db_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT question_number, bbox_json FROM questions WHERE paper_id = ? AND page_no = ?;",
+                        (sel_p["id"], page_choice),
+                    )
+                    q_boxes = [dict(r) for r in cursor.fetchall()]
+
+                annotated_bgr = clean_bgr.copy()
+                h_img, w_img = annotated_bgr.shape[:2]
+
+                for qb in q_boxes:
+                    qnum = qb.get("question_number") or ""
+                    bbox_str = qb.get("bbox_json")
+                    if bbox_str:
+                        try:
+                            box = json.loads(bbox_str)
+                            if isinstance(box, list) and len(box) == 4:
+                                x1, y1, x2, y2 = [int(v) for v in box]
+                                x1 = max(0, min(w_img - 1, x1))
+                                y1 = max(0, min(h_img - 1, y1))
+                                x2 = max(0, min(w_img, x2))
+                                y2 = max(0, min(h_img, y2))
+                                cv2.rectangle(annotated_bgr, (x1, y1), (x2, y2), (0, 180, 0), 2)
+                                cv2.putText(
+                                    annotated_bgr,
+                                    f"Q{qnum}",
+                                    (x1, max(20, y1 - 6)),
+                                    cv2.FONT_HERSHEY_SIMPLEX,
+                                    0.6,
+                                    (0, 140, 0),
+                                    2,
+                                )
+                        except Exception:
+                            pass
+
+                col_p1, col_p2, col_p3 = st.columns(3)
+                with col_p1:
+                    st.subheader("1. Original Render (110 DPI)")
+                    st.image(cv2.cvtColor(raw_bgr, cv2.COLOR_BGR2RGB), use_container_width=True)
+                with col_p2:
+                    st.subheader(f"2. Cleaned Image (Score: {prep_res['quality_score']})")
+                    st.image(cv2.cvtColor(clean_bgr, cv2.COLOR_BGR2RGB), use_container_width=True)
+                with col_p3:
+                    st.subheader(f"3. Question BBoxes ({len(q_boxes)})")
+                    st.image(cv2.cvtColor(annotated_bgr, cv2.COLOR_BGR2RGB), use_container_width=True)
 
     # SUB-TAB 2: REVIEW QUEUE
     with tab_review:
@@ -976,26 +1312,82 @@ elif selected_page == "🛡️ Admin Management Portal":
             with col_s2:
                 mcq_filter_status = st.selectbox("Filter Status", ["All", "draft", "verified"], key="mcq_stat_sel")
 
+            c_gen, _ = st.columns([2, 1])
+            with c_gen:
+                if st.button("🤖 Generate rule-based MCQs for this subject", use_container_width=True):
+                    counts = generate_mcqs_for_subject(sub_id_mcq)
+                    st.success(f"Generated {counts['created']} rule-based MCQs ({counts['skipped']} questions skipped).")
+                    st.info("ℹ️ Note: These rule-based MCQs test syllabus topic classification and command-verb task recognition, not domain answers.")
+                    st.rerun()
+
+            with st.expander("✍️ Write a Real MCQ Manually", expanded=False):
+                with get_db_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        """
+                        SELECT q.id, q.question_number, q.question_text, p.year
+                        FROM questions q
+                        JOIN papers p ON q.paper_id = p.id
+                        WHERE p.subject_id = ?
+                        ORDER BY q.id ASC;
+                        """,
+                        (sub_id_mcq,),
+                    )
+                    man_q_rows = [dict(r) for r in cursor.fetchall()]
+
+                if man_q_rows:
+                    q_choice_map = {f"Q#{r['question_number']} ({r['year']}) - {r['question_text'][:60]}...": r["id"] for r in man_q_rows}
+                    sel_q_label = st.selectbox("Select Target Question", list(q_choice_map.keys()), key="man_q_sel")
+                    sel_q_id = q_choice_map[sel_q_label]
+
+                    man_opt_a = st.text_input("Option A", key="man_opt_a")
+                    man_opt_b = st.text_input("Option B", key="man_opt_b")
+                    man_opt_c = st.text_input("Option C", key="man_opt_c")
+                    man_opt_d = st.text_input("Option D", key="man_opt_d")
+                    man_correct = st.radio("Correct Option", ["A", "B", "C", "D"], horizontal=True, key="man_opt_correct")
+                    man_exp = st.text_area("Explanation / Textbook Reference", key="man_opt_exp")
+
+                    if st.button("💾 Submit Verified MCQ", type="primary", key="btn_submit_manual_mcq"):
+                        if man_opt_a.strip() and man_opt_b.strip() and man_opt_c.strip() and man_opt_d.strip():
+                            add_mcq(
+                                question_id=sel_q_id,
+                                option_a=man_opt_a,
+                                option_b=man_opt_b,
+                                option_c=man_opt_c,
+                                option_d=man_opt_d,
+                                correct_option=man_correct,
+                                explanation=man_exp or "Manually verified question explanation.",
+                                status="verified",
+                                generator="manual",
+                            )
+                            st.success("Verified MCQ added successfully!")
+                            st.rerun()
+                        else:
+                            st.error("Please fill in all options A through D.")
+
             filter_arg = None if mcq_filter_status == "All" else mcq_filter_status
             subject_mcqs = get_mcqs_for_subject(sub_id_mcq, status=filter_arg)
+            # Exclude archived MCQs
+            subject_mcqs = [m for m in subject_mcqs if m.get("status") != "archived"]
 
             if not subject_mcqs:
-                st.info(f"No MCQs found matching '{mcq_filter_status}' status for {sel_sub_mcq}.")
+                st.info(f"No active MCQs found matching '{mcq_filter_status}' status for {sel_sub_mcq}.")
             else:
                 st.write(f"Showing **{len(subject_mcqs)}** MCQ(s):")
                 for mcq in subject_mcqs[:20]:
                     mcq_id = mcq["id"]
                     is_verified = (mcq.get("status") == "verified")
-                    status_badge = "✅ **Verified**" if is_verified else "🟡 **Draft**"
+                    gen_name = mcq.get("generator") or "manual"
+                    status_badge = f"{'✅ **Verified**' if is_verified else '🟡 **Draft**'} | `{gen_name}`"
                     
                     with st.expander(f"Question #{mcq.get('question_number', '')} ({mcq.get('marks')} Marks) — {status_badge}", expanded=not is_verified):
-                        st.markdown(f"**Question:** {mcq.get('question_text')}")
-                        st.markdown(f"- **A:** {mcq.get('option_a')}")
-                        st.markdown(f"- **B:** {mcq.get('option_b')}")
-                        st.markdown(f"- **C:** {mcq.get('option_c')}")
-                        st.markdown(f"- **D:** {mcq.get('option_d')}")
+                        st.markdown(f"**Question:** {safe(mcq.get('question_text'))}")
+                        st.markdown(f"- **A:** {safe(mcq.get('option_a'))}")
+                        st.markdown(f"- **B:** {safe(mcq.get('option_b'))}")
+                        st.markdown(f"- **C:** {safe(mcq.get('option_c'))}")
+                        st.markdown(f"- **D:** {safe(mcq.get('option_d'))}")
                         st.markdown(f"**Correct Option:** `{mcq.get('correct_option')}`")
-                        st.caption(f"Explanation: {mcq.get('explanation')}")
+                        st.caption(f"Explanation: {safe(mcq.get('explanation'))}")
 
                         if not is_verified:
                             if st.button("✅ Mark as Verified", key=f"btn_verify_mcq_{mcq_id}", type="primary"):
@@ -1258,9 +1650,16 @@ elif selected_page == "🛡️ Admin Management Portal":
                 st.success("All predictions successfully recomputed with updated recency and gap scores.")
 
         with col_b2:
-            if st.button("🧹 Clean Orphaned Records", use_container_width=True):
-                stats = cleanup_orphaned_records()
-                st.success(f"Cleaned {stats['orphaned_mcqs']} orphaned MCQs and {stats['unused_diagram_groups']} unused diagram groups.")
+            orphan_info = preview_orphans()
+            st.caption(f"Orphan rows detected: {orphan_info['orphaned_mcqs']} MCQs, {orphan_info['unused_diagram_groups']} unused groups.")
+            clean_confirmed = st.checkbox("I understand these rows will be exported then removed", key="chk_orphan_clean")
+            if st.button("🧹 Clean Orphaned Records", use_container_width=True, disabled=not clean_confirmed):
+                stats = cleanup_orphans(confirm=True)
+                if stats.get("success"):
+                    st.success(f"Backed up to `{os.path.basename(stats['backup_path'])}` and cleaned {stats['orphaned_mcqs']} MCQs, {stats['unused_diagram_groups']} groups.")
+                    st.rerun()
+                else:
+                    st.error(stats.get("message", "Failed to clean orphans."))
 
         with col_b3:
             db_json = export_database_json()

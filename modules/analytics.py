@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 from modules.database import get_db_connection
 from modules.scoring import calculate_cluster_predictions
 
@@ -18,7 +18,10 @@ def analyze_attempt_performance(attempt_id: int) -> Dict[str, Any]:
             """,
             (attempt_id,),
         )
-        attempt = dict(cursor.fetchone())
+        row = cursor.fetchone()
+        if not row:
+            return {"error": "Attempt not found"}
+        attempt = dict(row)
 
         # Fetch all responses with question details
         cursor.execute(
@@ -82,9 +85,19 @@ def analyze_attempt_performance(attempt_id: int) -> Dict[str, Any]:
     strengths = []
     weaknesses = []
     topic_summary = []
+    skipped_topics = []
 
     for top, s in topic_stats.items():
-        accuracy = (s["correct"] / s["total"] * 100.0) if s["total"] > 0 else 0.0
+        if s["total"] == 0:
+            # All questions in this topic were skipped (out of syllabus)
+            accuracy = None
+            priority_index = 0.0
+            all_skipped = True
+            skipped_topics.append(top)
+        else:
+            accuracy = round(s["correct"] / s["total"] * 100.0, 1)
+            all_skipped = False
+
         # Average predicted likelihood of related questions
         cluster_scores = [
             subject_predictions.get(r["cluster_id"], 50.0)
@@ -92,9 +105,12 @@ def analyze_attempt_performance(attempt_id: int) -> Dict[str, Any]:
         ]
         avg_likelihood = sum(cluster_scores) / max(1, len(cluster_scores))
         
-        # Revision priority (0 to 100)
-        unmastered_ratio = 1.0 - (accuracy / 100.0)
-        priority_index = round(unmastered_ratio * avg_likelihood, 1)
+        if not all_skipped and accuracy is not None:
+            # Revision priority (0 to 100)
+            unmastered_ratio = 1.0 - (accuracy / 100.0)
+            priority_index = round(unmastered_ratio * avg_likelihood, 1)
+        else:
+            priority_index = 0.0
 
         summary_item = {
             "topic": top,
@@ -102,17 +118,19 @@ def analyze_attempt_performance(attempt_id: int) -> Dict[str, Any]:
             "total_attempted": s["total"],
             "correct": s["correct"],
             "skipped": s["skipped"],
-            "accuracy": round(accuracy, 1),
+            "accuracy": accuracy,
             "priority_score": priority_index,
             "avg_likelihood": round(avg_likelihood, 1),
+            "all_skipped": all_skipped,
             "recommended_book": f"Standard Prescribed Syllabus Text (Chapter/Unit {s['unit']})",
         }
         topic_summary.append(summary_item)
 
-        if accuracy >= 75.0 and s["total"] > 0:
-            strengths.append(top)
-        elif accuracy < 60.0 or s["mistakes"] > 0:
-            weaknesses.append(top)
+        if not all_skipped and accuracy is not None:
+            if accuracy >= 75.0:
+                strengths.append(top)
+            elif accuracy < 60.0 or s["mistakes"] > 0:
+                weaknesses.append(top)
 
     # Sort topics by highest revision priority first
     topic_summary.sort(key=lambda x: x["priority_score"], reverse=True)
@@ -128,6 +146,7 @@ def analyze_attempt_performance(attempt_id: int) -> Dict[str, Any]:
         "strengths": strengths,
         "weaknesses": weaknesses,
         "topic_summary": topic_summary,
+        "skipped_topics": skipped_topics,
         "mistakes": mistakes_list,
         "skipped_items": skipped_list,
     }

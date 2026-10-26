@@ -1,14 +1,10 @@
 import hashlib
-import io
 import os
-import re
-import shutil
-import tempfile
+import urllib.parse
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 import pymupdf
-from PIL import Image
 
 from modules.database import (
     get_db_connection,
@@ -19,15 +15,12 @@ from modules.database import (
     get_all_subjects,
     add_subject,
     add_source_file,
-    get_source_file_by_hash,
     log_action,
 )
 from modules.hashing import compute_image_phash, find_or_create_diagram_group
-from modules.metadata import extract_metadata, match_subject
+from modules.metadata import match_subject
 from modules.parser import (
-    calculate_confidence_score,
     parse_page_questions,
-    suggest_tags_from_text,
 )
 from modules.preprocess import preprocess_page_image
 from modules.segmenter import segment_pdf
@@ -55,15 +48,58 @@ def compute_file_sha256(file_bytes: bytes) -> str:
     return hashlib.sha256(file_bytes).hexdigest()
 
 
-def download_drive_file(drive_url: str, output_path: str) -> bool:
-    """Downloads a public Google Drive file using gdown."""
+class DownloadResult(tuple):
+    """Tuple subclass (success, message) that evaluates truthy if success is True."""
+    def __bool__(self) -> bool:
+        return bool(self[0])
+
+
+def download_drive_file(drive_url: str, output_path: str) -> Tuple[bool, str]:
+    """Downloads a public Google Drive file using gdown with strict validation.
+    
+    Verifies URL host is drive.google.com or docs.google.com.
+    Verifies downloaded file <= 100 MB and starts with %PDF header.
+    Returns (success: bool, message: str) wrapped in DownloadResult.
+    """
+    if not drive_url:
+        return DownloadResult((False, "Empty Google Drive URL."))
+    try:
+        parsed = urllib.parse.urlparse(drive_url)
+        netloc = (parsed.netloc or "").lower().split(":")[0]
+        if netloc not in ("drive.google.com", "docs.google.com"):
+            return DownloadResult((False, f"Invalid host '{netloc}'. URL must be from drive.google.com or docs.google.com."))
+    except Exception as e:
+        return DownloadResult((False, f"Malformed URL: {e}"))
+
     try:
         import gdown
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
         gdown.download(url=drive_url, output=output_path, quiet=False, fuzzy=True)
-        return os.path.exists(output_path) and os.path.getsize(output_path) > 100
-    except Exception:
-        return False
+        
+        if not os.path.exists(output_path):
+            return DownloadResult((False, "File could not be downloaded from Google Drive."))
+            
+        size = os.path.getsize(output_path)
+        if size > MAX_PDF_BYTES:
+            if os.path.exists(output_path):
+                os.remove(output_path)
+            return DownloadResult((False, f"Downloaded file exceeds 100 MB limit ({round(size / (1024 * 1024), 1)} MB)."))
+            
+        with open(output_path, "rb") as f:
+            header = f.read(5)
+        if not header.startswith(b"%PDF"):
+            if os.path.exists(output_path):
+                os.remove(output_path)
+            return DownloadResult((False, "Downloaded file does not start with valid %PDF header."))
+            
+        return DownloadResult((True, "File downloaded successfully."))
+    except Exception as e:
+        if os.path.exists(output_path):
+            try:
+                os.remove(output_path)
+            except Exception:
+                pass
+        return DownloadResult((False, f"Download failed: {e}"))
 
 
 def validate_pdf_bytes(file_bytes: bytes) -> Tuple[bool, str]:
@@ -89,11 +125,26 @@ def validate_pdf_bytes(file_bytes: bytes) -> Tuple[bool, str]:
     return True, "Valid PDF"
 
 
+def _report_progress(callback: Optional[Callable], msg: str, pct: float) -> None:
+    """Invokes progress callback supporting both (msg, float) and (curr, total, msg) signatures."""
+    if not callback:
+        return
+    try:
+        callback(msg, pct)
+    except TypeError:
+        try:
+            callback(int(pct * 100), 100, msg)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
 def ingest_combined_pdf(
     file_bytes: bytes,
     original_filename: str,
     actor_email: str = "diyanshah2301@gmail.com",
-    progress_callback: Optional[Callable[[int, int, str], None]] = None,
+    progress_callback: Optional[Callable] = None,
 ) -> Tuple[bool, str, List[Dict[str, Any]]]:
     """Auto-detects and segregates multiple examination papers from a combined PDF document.
     
@@ -110,6 +161,7 @@ def ingest_combined_pdf(
     source_sha256 = compute_file_sha256(file_bytes)
 
     # 1. Store source file in data/sources/
+    _report_progress(progress_callback, "Saving source file...", 0.10)
     sources_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "sources")
     os.makedirs(sources_dir, exist_ok=True)
     source_filename = f"source_{source_sha256[:12]}_{original_filename}"
@@ -338,10 +390,13 @@ def process_pdf_document(
     semester: int,
     exam_type: str,
     actor_email: str = "diyanshah2301@gmail.com",
+    *,
+    progress_callback: Optional[Callable] = None,
 ) -> Tuple[bool, str, Dict[str, Any]]:
     """Manual Single Paper Ingestion Override:
     Takes explicit metadata from the user, crops snippets, and stores database records.
     """
+    _report_progress(progress_callback, "Saving source PDF file...", 0.10)
     file_hash = compute_file_sha256(file_bytes)
     
     # 1. Deduplication check
@@ -420,7 +475,7 @@ def process_pdf_document(
         q_text = q_data["question_text"]
         image_path = q_data.get("image_path")
         fig_path = q_data.get("figure_path")
-        fig_phash = q.get("figure_phash")
+        fig_phash = q_data.get("figure_phash")
 
         if image_path or fig_path:
             extracted_snippets_count += 1

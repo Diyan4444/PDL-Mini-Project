@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 
 def compute_quality_score(gray: np.ndarray) -> float:

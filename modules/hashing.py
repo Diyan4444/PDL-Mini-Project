@@ -1,6 +1,7 @@
 import os
 import uuid
-from typing import Any, Optional, Tuple, Union
+from typing import Optional, Tuple, Union
+import cv2
 import numpy as np
 from PIL import Image
 import imagehash
@@ -26,14 +27,14 @@ def compute_image_phash(image_input: Union[str, np.ndarray, Image.Image]) -> Opt
                 return None
             # If 3 channels (BGR from OpenCV), convert to RGB
             if len(image_input.shape) == 3 and image_input.shape[2] == 3:
-                rgb = cv2.cvtColor(image_input, cv2.COLOR_BGR2RGB) if 'cv2' in globals() else image_input[:, :, ::-1]
+                rgb = cv2.cvtColor(image_input, cv2.COLOR_BGR2RGB)
                 pil_img = Image.fromarray(rgb)
             else:
                 pil_img = Image.fromarray(image_input)
             return str(imagehash.phash(pil_img.convert("RGB")))
         elif isinstance(image_input, Image.Image):
             return str(imagehash.phash(image_input.convert("RGB")))
-    except Exception as e:
+    except Exception:
         return None
     return None
 

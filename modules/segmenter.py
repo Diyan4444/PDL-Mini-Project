@@ -1,7 +1,7 @@
 import hashlib
 import os
 import re
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 import cv2
 import numpy as np
 import pymupdf

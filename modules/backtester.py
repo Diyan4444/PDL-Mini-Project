@@ -35,28 +35,32 @@ def run_historical_backtest(
         return {
             "success": False,
             "message": f"No examination questions found for test year {test_year}.",
+            "train_years": [],
             "hit_rate": 0.0,
+            "recency_baseline_hit_rate": 0.0,
             "total_actual": 0,
             "hits_count": 0,
             "matched_pairs": [],
         }
 
-    # 2. Run prediction model constrained to current_year = test_year
-    # Note: calculate_cluster_predictions calculates recency and gaps relative to reference year
-    all_predictions = calculate_cluster_predictions(subject_id, current_year=test_year)
+    # 2. Run prediction model strictly on years < test_year without data leakage
+    training_predictions = calculate_cluster_predictions(
+        subject_id, current_year=test_year, max_year_exclusive=test_year
+    )
     
-    # Filter predictions to only those whose members appeared strictly before test_year
-    training_predictions = []
-    for pred in all_predictions:
-        prior_members = [m for m in pred["members"] if m["year"] < test_year]
-        if prior_members:
-            training_predictions.append(pred)
+    # Identify training years actually present in the model
+    train_years_set = set()
+    for pred in training_predictions:
+        train_years_set.update(pred.get("years_appeared", []))
+    train_years = sorted(list(train_years_set))
 
     if not training_predictions:
         return {
             "success": False,
             "message": f"No historical papers exist prior to {test_year} for back-testing.",
+            "train_years": [],
             "hit_rate": 0.0,
+            "recency_baseline_hit_rate": 0.0,
             "total_actual": len(actual_questions),
             "hits_count": 0,
             "matched_pairs": [],
@@ -71,7 +75,6 @@ def run_historical_backtest(
     misses = []
 
     for act_q in actual_questions:
-        matched = False
         best_sim = 0.0
         best_pred = None
 
@@ -97,14 +100,58 @@ def run_historical_backtest(
     hits_count = len(hits)
     hit_rate = round((hits_count / total_actual_count * 100.0), 1) if total_actual_count > 0 else 0.0
 
+    # 5. Calculate naive recency baseline: rank clusters purely by latest appearance year
+    recency_ranked = sorted(training_predictions, key=lambda x: max(x.get("years_appeared") or [0]), reverse=True)
+    baseline_top = recency_ranked[:num_top]
+    baseline_hits_count = 0
+    for act_q in actual_questions:
+        for b_pred in baseline_top:
+            if fuzz.token_sort_ratio(act_q["question_text"], b_pred["question_text"]) >= 70.0:
+                baseline_hits_count += 1
+                break
+    recency_baseline_hit_rate = round((baseline_hits_count / total_actual_count * 100.0), 1) if total_actual_count > 0 else 0.0
+
     return {
         "success": True,
         "test_year": test_year,
+        "train_years": train_years,
         "total_actual": total_actual_count,
         "top_predictions_evaluated": len(top_predictions),
         "hits_count": hits_count,
         "misses_count": len(misses),
         "hit_rate": hit_rate,
+        "recency_baseline_hit_rate": recency_baseline_hit_rate,
         "matched_pairs": hits,
         "missed_questions": misses,
     }
+
+
+def run_rolling_backtest(subject_id: int) -> List[Dict[str, Any]]:
+    """Runs historical back-testing for every year that has at least one earlier year in the dataset.
+    Returns list of dicts with test_year, hit_rate, recency_baseline_hit_rate, total_actual.
+    """
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT DISTINCT year FROM papers WHERE subject_id = ? AND year IS NOT NULL ORDER BY year ASC;",
+            (subject_id,),
+        )
+        years = [r[0] for r in cursor.fetchall() if r[0] is not None]
+
+    if len(years) < 2:
+        return []
+
+    results = []
+    for i in range(1, len(years)):
+        t_year = years[i]
+        res = run_historical_backtest(subject_id, test_year=t_year)
+        if res.get("success"):
+            results.append({
+                "test_year": t_year,
+                "hit_rate": res.get("hit_rate", 0.0),
+                "recency_baseline_hit_rate": res.get("recency_baseline_hit_rate", 0.0),
+                "total_actual": res.get("total_actual", 0),
+                "hits_count": res.get("hits_count", 0),
+                "train_years": res.get("train_years", []),
+            })
+    return results

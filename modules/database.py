@@ -1,5 +1,9 @@
+import hashlib
+import hmac
 import json
 import os
+import re
+import secrets
 import shutil
 import sqlite3
 from datetime import datetime
@@ -24,12 +28,21 @@ DEFAULT_TAGS = [
 ]
 
 
-def get_db_connection() -> sqlite3.Connection:
-    """Creates a connection to the SQLite database with WAL mode enabled."""
+class ManagedConnection(sqlite3.Connection):
+    """Custom sqlite3.Connection that automatically commits/rolls back and closes itself upon context exit."""
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        try:
+            super().__exit__(exc_type, exc_val, exc_tb)
+        finally:
+            self.close()
+
+
+def get_db_connection() -> ManagedConnection:
+    """Creates a connection to the SQLite database using ManagedConnection with foreign keys enabled."""
     os.makedirs(DB_DIR, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, timeout=30.0)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0, factory=ManagedConnection)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA foreign_keys=ON;")
     return conn
 
@@ -40,6 +53,7 @@ def init_db():
     """
     with get_db_connection() as conn:
         cursor = conn.cursor()
+        conn.execute("PRAGMA journal_mode=WAL;")
 
         # 0. Source Files (Combined PDF parent sources)
         cursor.execute(
@@ -208,6 +222,20 @@ def init_db():
             """
         )
 
+        # 11. Student Accounts
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS student_accounts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_id TEXT UNIQUE NOT NULL,
+                display_name TEXT,
+                salt TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """
+        )
+
         # Seed initial tags if empty
         cursor.execute("SELECT COUNT(*) FROM tags;")
         if cursor.fetchone()[0] == 0:
@@ -259,11 +287,28 @@ def init_db():
             if col_name not in existing_q_cols:
                 cursor.execute(f"ALTER TABLE questions ADD COLUMN {col_name} {col_type};")
 
-        # C. MCQ Bank status column
+        # C. MCQ Bank status, generator, quality_flag columns
         cursor.execute("PRAGMA table_info(mcq_bank);")
         existing_mcq_cols = {row["name"] for row in cursor.fetchall()}
         if "status" not in existing_mcq_cols:
             cursor.execute("ALTER TABLE mcq_bank ADD COLUMN status TEXT DEFAULT 'draft';")
+        if "generator" not in existing_mcq_cols:
+            cursor.execute("ALTER TABLE mcq_bank ADD COLUMN generator TEXT;")
+        if "quality_flag" not in existing_mcq_cols:
+            cursor.execute("ALTER TABLE mcq_bank ADD COLUMN quality_flag TEXT;")
+
+        # Retire old legacy placeholder MCQs idempotently
+        cursor.execute(
+            """
+            UPDATE mcq_bank 
+            SET generator = 'legacy_placeholder', status = 'archived'
+            WHERE (
+                option_a LIKE 'Standard primary concept in%' 
+                OR option_a LIKE 'Key condition in%' 
+                OR option_b = 'Secondary alternate implementation rule'
+            ) AND generator IS NULL;
+            """
+        )
 
         conn.commit()
 
@@ -785,13 +830,18 @@ def add_mcq(
     correct_option: str,
     explanation: str,
     status: str = "draft",
+    generator: Optional[str] = None,
+    quality_flag: Optional[str] = None,
 ) -> int:
     with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
             """
-            INSERT INTO mcq_bank (question_id, option_a, option_b, option_c, option_d, correct_option, explanation, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+            INSERT INTO mcq_bank (
+                question_id, option_a, option_b, option_c, option_d,
+                correct_option, explanation, status, generator, quality_flag
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             (
                 question_id,
@@ -802,6 +852,8 @@ def add_mcq(
                 correct_option.strip().upper(),
                 explanation.strip(),
                 status.strip().lower(),
+                generator,
+                quality_flag,
             ),
         )
         conn.commit()
@@ -891,8 +943,8 @@ def get_all_papers_detailed() -> List[Dict[str, Any]]:
 
 
 def delete_paper(paper_id: int) -> bool:
-    """Removes a paper, its physical PDF, all associated cropped question images,
-    and all database questions, tags, and MCQs in cascade.
+    """Removes a paper, its physical PDF, all associated cropped question images
+    (if not shared with other papers), and all database questions, tags, responses, and MCQs in cascade.
     """
     with get_db_connection() as conn:
         cursor = conn.cursor()
@@ -904,27 +956,53 @@ def delete_paper(paper_id: int) -> bool:
             return False
         paper_file_path = p_row["file_path"]
 
-        # 2. Get all question image paths & figure paths
-        cursor.execute("SELECT image_path, figure_path FROM questions WHERE paper_id = ?;", (paper_id,))
+        # 2. Get all question ids, image paths & figure paths
+        cursor.execute("SELECT id, image_path, figure_path FROM questions WHERE paper_id = ?;", (paper_id,))
         img_rows = cursor.fetchall()
+        q_ids = [r["id"] for r in img_rows]
+
         for img_r in img_rows:
             for path_key in ("image_path", "figure_path"):
                 path_val = img_r[path_key]
                 if path_val and os.path.exists(path_val):
-                    try:
-                        os.remove(path_val)
-                    except Exception:
-                        pass
+                    cursor.execute(
+                        "SELECT COUNT(*) FROM questions WHERE (image_path = ? OR figure_path = ?) AND paper_id != ?;",
+                        (path_val, path_val, paper_id),
+                    )
+                    ref_count = cursor.fetchone()[0]
+                    if ref_count == 0:
+                        try:
+                            os.remove(path_val)
+                        except Exception:
+                            pass
 
-        # 3. Delete physical PDF
+        # 3. Explicitly delete child rows belonging to this paper's questions
+        if q_ids:
+            placeholders = ",".join("?" for _ in q_ids)
+            cursor.execute(f"DELETE FROM mcq_bank WHERE question_id IN ({placeholders});", q_ids)
+            cursor.execute(f"DELETE FROM question_tags WHERE question_id IN ({placeholders});", q_ids)
+            cursor.execute(f"DELETE FROM student_responses WHERE question_id IN ({placeholders});", q_ids)
+            cursor.execute("DELETE FROM questions WHERE paper_id = ?;", (paper_id,))
+
+        # 4. Delete physical PDF
         if paper_file_path and os.path.exists(paper_file_path):
             try:
                 os.remove(paper_file_path)
             except Exception:
                 pass
 
-        # 4. Delete paper record (Cascade deletes questions, mcqs, question_tags)
+        # 5. Delete paper record
         cursor.execute("DELETE FROM papers WHERE id = ?;", (paper_id,))
+
+        # 6. Remove any diagram_groups row no longer referenced
+        cursor.execute(
+            """
+            DELETE FROM diagram_groups 
+            WHERE id NOT IN (
+                SELECT DISTINCT diagram_group_id FROM questions WHERE diagram_group_id IS NOT NULL
+            );
+            """
+        )
         conn.commit()
 
         log_action("ADMIN", "DELETE_PAPER", f"Deleted paper ID {paper_id} and associated question assets.")
@@ -951,15 +1029,61 @@ def delete_subject(subject_id: int) -> bool:
         return True
 
 
-def cleanup_orphaned_records() -> Dict[str, int]:
-    """Cleans up orphan MCQs and unreferenced diagram groups."""
+def preview_orphans() -> Dict[str, int]:
+    """Returns counts of orphan mcq_bank rows and unused diagram_groups."""
     with get_db_connection() as conn:
         cursor = conn.cursor()
-        # Clean orphan MCQs
+        cursor.execute("SELECT COUNT(*) FROM mcq_bank WHERE question_id NOT IN (SELECT id FROM questions);")
+        orphan_mcqs = cursor.fetchone()[0]
+        cursor.execute(
+            """
+            SELECT COUNT(*) FROM diagram_groups 
+            WHERE id NOT IN (
+                SELECT DISTINCT diagram_group_id FROM questions WHERE diagram_group_id IS NOT NULL
+            );
+            """
+        )
+        unused_groups = cursor.fetchone()[0]
+        return {"orphaned_mcqs": orphan_mcqs, "unused_diagram_groups": unused_groups}
+
+
+def cleanup_orphans(confirm: bool = False) -> Dict[str, Any]:
+    """Dumps orphan MCQs and unused diagram groups to a timestamped JSON backup,
+    then deletes them if confirm is True.
+    """
+    if not confirm:
+        return {"success": False, "message": "Confirmation required.", "orphaned_mcqs": 0, "unused_diagram_groups": 0}
+
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM mcq_bank WHERE question_id NOT IN (SELECT id FROM questions);")
+        orphan_mcqs_rows = [dict(r) for r in cursor.fetchall()]
+        cursor.execute(
+            """
+            SELECT * FROM diagram_groups 
+            WHERE id NOT IN (
+                SELECT DISTINCT diagram_group_id FROM questions WHERE diagram_group_id IS NOT NULL
+            );
+            """
+        )
+        unused_groups_rows = [dict(r) for r in cursor.fetchall()]
+
+        # Dump to JSON backup file
+        os.makedirs(os.path.join(DB_DIR, "backups"), exist_ok=True)
+        ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_filename = f"orphans_{ts_str}.json"
+        backup_path = os.path.join(DB_DIR, "backups", backup_filename)
+
+        with open(backup_path, "w", encoding="utf-8") as bf:
+            json.dump({
+                "timestamp": ts_str,
+                "orphaned_mcqs": orphan_mcqs_rows,
+                "unused_diagram_groups": unused_groups_rows,
+            }, bf, indent=2, default=str)
+
         cursor.execute("DELETE FROM mcq_bank WHERE question_id NOT IN (SELECT id FROM questions);")
         cleaned_mcqs = cursor.rowcount
 
-        # Clean unreferenced diagram groups
         cursor.execute(
             """
             DELETE FROM diagram_groups 
@@ -970,8 +1094,67 @@ def cleanup_orphaned_records() -> Dict[str, int]:
         )
         cleaned_groups = cursor.rowcount
         conn.commit()
-        log_action("ADMIN", "CLEANUP_ORPHANS", f"Cleaned {cleaned_mcqs} orphaned MCQs and {cleaned_groups} unused diagram groups.")
-        return {"orphaned_mcqs": cleaned_mcqs, "unused_diagram_groups": cleaned_groups}
+
+        log_action("ADMIN", "CLEANUP_ORPHANS", f"Backed up and removed {cleaned_mcqs} orphaned MCQs and {cleaned_groups} unused diagram groups.")
+        return {
+            "success": True,
+            "backup_path": backup_path,
+            "orphaned_mcqs": cleaned_mcqs,
+            "unused_diagram_groups": cleaned_groups,
+        }
+
+
+def cleanup_orphaned_records() -> Dict[str, int]:
+    """Legacy alias for cleanup_orphans(confirm=True)."""
+    res = cleanup_orphans(confirm=True)
+    return {"orphaned_mcqs": res["orphaned_mcqs"], "unused_diagram_groups": res["unused_diagram_groups"]}
+
+
+# Student Accounts Helpers
+def create_student_account(student_id: str, display_name: str, password: str) -> Tuple[bool, str]:
+    """Registers a new student account with PBKDF2-HMAC-SHA256 password hashing.
+    Enforces student_id 3-30 chars matching [a-z0-9_.-] and password >= 8 chars.
+    """
+    if not student_id or not re.match(r"^[a-z0-9_.-]{3,30}$", student_id.lower().strip()):
+        return False, "Student ID must be 3-30 characters and contain only lowercase letters, digits, underscores, dots, or hyphens."
+    if not password or len(password) < 8:
+        return False, "Password must be at least 8 characters long."
+
+    norm_sid = student_id.lower().strip()
+    salt = secrets.token_hex(16)
+    p_hash = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt), 200_000).hex()
+
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM student_accounts WHERE student_id = ?;", (norm_sid,))
+        if cursor.fetchone():
+            return False, f"Student account '{norm_sid}' already exists."
+        cursor.execute(
+            """
+            INSERT INTO student_accounts (student_id, display_name, salt, password_hash)
+            VALUES (?, ?, ?, ?);
+            """,
+            (norm_sid, display_name or norm_sid, salt, p_hash),
+        )
+        conn.commit()
+        return True, "Account created successfully."
+
+
+def verify_student_account(student_id: str, password: str) -> bool:
+    """Verifies a student's password against the PBKDF2-HMAC-SHA256 hash."""
+    if not student_id or not password:
+        return False
+    norm_sid = student_id.lower().strip()
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT salt, password_hash FROM student_accounts WHERE student_id = ?;", (norm_sid,))
+        row = cursor.fetchone()
+        if not row:
+            return False
+        salt = row["salt"]
+        stored_hash = row["password_hash"]
+        computed_hash = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt), 200_000).hex()
+        return hmac.compare_digest(stored_hash, computed_hash)
 
 
 # Database Backup & Export

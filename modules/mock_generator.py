@@ -22,8 +22,25 @@ def generate_mock_paper(
         cursor.execute("SELECT name, code FROM subjects WHERE id = ?;", (subject_id,))
         subj = dict(cursor.fetchone())
 
+        # Determine department/branch from most recent paper
+        cursor.execute(
+            """
+            SELECT branch, program 
+            FROM papers 
+            WHERE subject_id = ? AND (branch IS NOT NULL OR program IS NOT NULL)
+            ORDER BY year DESC, id DESC LIMIT 1;
+            """,
+            (subject_id,),
+        )
+        p_meta = cursor.fetchone()
+        department = "EXAMINATION"
+        if p_meta:
+            department = (p_meta["branch"] or p_meta["program"] or "EXAMINATION").strip().upper()
+
     paper_sections = []
     accumulated_marks = 0.0
+    used_texts = set()
+    warnings: List[str] = []
 
     if exam_type.lower() == "midterm" or target_marks <= 40:
         target_marks = 40
@@ -35,7 +52,8 @@ def generate_mock_paper(
         # Section A: 4 questions x 5 marks = 20 marks
         sec_a_q = []
         for p in mid_preds:
-            if len(sec_a_q) < 4:
+            if p["question_text"] not in used_texts and len(sec_a_q) < 4:
+                used_texts.add(p["question_text"])
                 sec_a_q.append({
                     "q_num": f"Q{len(sec_a_q) + 1}",
                     "text": p["question_text"],
@@ -56,7 +74,8 @@ def generate_mock_paper(
         # Section B: 2 questions x 10 marks = 20 marks
         sec_b_q = []
         for p in mid_preds:
-            if p["question_text"] not in [q["text"] for q in sec_a_q] and len(sec_b_q) < 2:
+            if p["question_text"] not in used_texts and len(sec_b_q) < 2:
+                used_texts.add(p["question_text"])
                 sec_b_q.append({
                     "q_num": f"Q{len(sec_a_q) + len(sec_b_q) + 1}",
                     "text": p["question_text"],
@@ -79,17 +98,20 @@ def generate_mock_paper(
         # Endterm Blueprint: Units 1 to 5
         # Part A: 10 questions x 2 marks = 20 marks
         sec_a_q = []
-        for idx, p in enumerate(predictions[:10]):
-            sec_a_q.append({
-                "q_num": f"1({chr(97 + idx)})",
-                "text": p["question_text"],
-                "marks": 2.0,
-                "unit": p["unit"],
-                "topic": p["topic"],
-                "likelihood": p["likelihood"],
-                "image_path": p["image_path"],
-            })
-            accumulated_marks += 2.0
+        for p in predictions:
+            if p["question_text"] not in used_texts and len(sec_a_q) < 10:
+                idx = len(sec_a_q)
+                used_texts.add(p["question_text"])
+                sec_a_q.append({
+                    "q_num": f"1({chr(97 + idx)})",
+                    "text": p["question_text"],
+                    "marks": 2.0,
+                    "unit": p["unit"],
+                    "topic": p["topic"],
+                    "likelihood": p["likelihood"],
+                    "image_path": p["image_path"],
+                })
+                accumulated_marks += 2.0
 
         paper_sections.append({
             "section_name": "Part A (Mandatory Short Questions - 20 Marks)",
@@ -99,14 +121,15 @@ def generate_mock_paper(
 
         # Part B: 5 Units x 16 marks = 80 marks
         sec_b_q = []
-        assigned_units = set()
-        part_b_candidates = [p for p in predictions if p["question_text"] not in [q["text"] for q in sec_a_q]]
-
         q_counter = 2
         for unit_idx in range(1, 6):
-            unit_candidates = [p for p in part_b_candidates if p["unit"] == unit_idx]
-            chosen = unit_candidates[0] if unit_candidates else (part_b_candidates[0] if part_b_candidates else None)
-            if chosen:
+            unit_candidates = [
+                p for p in predictions 
+                if p["unit"] == unit_idx and p["question_text"] not in used_texts
+            ]
+            if unit_candidates:
+                chosen = unit_candidates[0]
+                used_texts.add(chosen["question_text"])
                 sec_b_q.append({
                     "q_num": f"Q{q_counter}",
                     "text": chosen["question_text"],
@@ -118,6 +141,8 @@ def generate_mock_paper(
                 })
                 accumulated_marks += 16.0
                 q_counter += 1
+            else:
+                warnings.append(f"No question available for Unit {unit_idx}")
 
         paper_sections.append({
             "section_name": "Part B (Unit-wise Detailed Questions - 80 Marks)",
@@ -125,11 +150,17 @@ def generate_mock_paper(
             "questions": sec_b_q,
         })
 
+    actual_marks = int(accumulated_marks)
+    if actual_marks != target_marks:
+        warnings.append(f"Total paper marks ({actual_marks}) differ from target marks ({target_marks}).")
+
     return {
         "subject_name": subj["name"],
         "subject_code": subj["code"] or "UNIV-EXAM",
+        "department": department,
         "exam_type": exam_type.upper(),
-        "total_marks": int(accumulated_marks),
+        "total_marks": actual_marks,
         "target_marks": target_marks,
         "sections": paper_sections,
+        "warnings": warnings,
     }

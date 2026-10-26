@@ -1,5 +1,5 @@
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 from rapidfuzz import fuzz
 
 ROMAN_TO_INT = {
@@ -61,7 +61,6 @@ def extract_metadata(text_lines: List[str], full_text: Optional[str] = None) -> 
     if not full_text:
         full_text = "\n".join(text_lines)
 
-    norm_full = clean_ocr_text(full_text)
     norm_lines = [clean_ocr_text(l) for l in text_lines if clean_ocr_text(l)]
 
     results: Dict[str, Any] = {

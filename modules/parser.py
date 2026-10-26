@@ -1,4 +1,3 @@
-import hashlib
 import os
 import re
 import uuid
@@ -365,12 +364,10 @@ def parse_page_questions(
         # Crop continuation snippet
         y1_cont = 0
         y2_cont = int(first_delim_y)
-        cont_crop_path = None
         if (y2_cont - y1_cont) >= 40:
             cont_filename = f"snippet_cont_p{paper_id}_pg{page_no}_{uuid.uuid4().hex[:6]}.png"
             dest_cont = os.path.join(DIAGRAM_ASSETS_DIR, cont_filename)
             cv2.imwrite(dest_cont, page_img_bgr[y1_cont:y2_cont, :])
-            cont_crop_path = dest_cont
 
         merged_q = dict(open_question_from_prev_page)
         if cont_text:

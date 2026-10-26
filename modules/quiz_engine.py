@@ -1,11 +1,8 @@
+import random
 import time
 from typing import Any, Dict, List, Optional
 import streamlit as st
-from modules.database import (
-    get_db_connection,
-    get_mcq_by_question_id,
-    add_mcq,
-)
+from modules.database import get_db_connection
 
 
 def load_quiz_questions(
@@ -15,11 +12,14 @@ def load_quiz_questions(
     text_only: bool = False,
     limit: int = 15,
     require_verified: bool = True,
+    *,
+    student_id: Optional[str] = None,
+    weak_topics: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
-    """Loads and formats questions for a student quiz based on selected filters.
+    """Loads and formats questions for a student quiz based on selected filters and adaptivity.
     
-    Filters to verified MCQs by default, falling back gracefully to available MCQs
-    if none have been verified yet.
+    Filters to verified MCQs by default, excluding archived MCQs.
+    Weights questions toward weak topics and down-weights recently correctly answered questions.
     """
     with get_db_connection() as conn:
         cursor = conn.cursor()
@@ -36,41 +36,104 @@ def load_quiz_questions(
         )
         verified_count = cursor.fetchone()[0]
 
-        # Use verified filter if available or required
-        status_filter = "AND m.status = 'verified'" if (verified_count > 0 and require_verified) else ""
+        # Use verified filter if available or required, otherwise exclude archived
+        status_filter = "AND m.status = 'verified'" if (verified_count > 0 and require_verified) else "AND m.status != 'archived'"
 
-        query = f"""
-            SELECT 
-                q.id, q.question_number, q.question_text, q.content_type, 
-                q.image_path, q.marks, q.unit, q.topic, p.year, p.exam_type,
-                m.option_a, m.option_b, m.option_c, m.option_d, m.correct_option, m.explanation
-            FROM mcq_bank m
-            JOIN questions q ON m.question_id = q.id
-            JOIN papers p ON q.paper_id = p.id
-            WHERE p.subject_id = ? {status_filter}
-        """
-        params = [subject_id]
+        def _fetch_rows(s_filter: str) -> List[Dict[str, Any]]:
+            q_str = f"""
+                SELECT 
+                    q.id, q.question_number, q.question_text, q.content_type, 
+                    q.image_path, q.marks, q.unit, q.topic, p.year, p.exam_type,
+                    m.option_a, m.option_b, m.option_c, m.option_d, m.correct_option, m.explanation
+                FROM mcq_bank m
+                JOIN questions q ON m.question_id = q.id
+                JOIN papers p ON q.paper_id = p.id
+                WHERE p.subject_id = ? {s_filter}
+            """
+            p_list: List[Any] = [subject_id]
+            if exam_type:
+                q_str += " AND p.exam_type = ?"
+                p_list.append(exam_type.lower())
+            if units:
+                placeholders = ",".join(["?"] * len(units))
+                q_str += f" AND q.unit IN ({placeholders})"
+                p_list.extend(units)
+            if text_only:
+                q_str += " AND q.content_type = 'text'"
+            q_str += " ORDER BY p.year DESC LIMIT ?;"
+            p_list.append(limit * 4)
+            cursor.execute(q_str, tuple(p_list))
+            return [dict(r) for r in cursor.fetchall()]
 
-        if exam_type:
-            query += " AND p.exam_type = ?"
-            params.append(exam_type.lower())
+        rows = _fetch_rows(status_filter)
 
-        if units:
-            placeholders = ",".join(["?"] * len(units))
-            query += f" AND q.unit IN ({placeholders})"
-            params.extend(units)
+        # Fallback 1: If verified filter yielded no rows for selected units, try non-archived pool
+        if not rows and status_filter != "AND m.status != 'archived'":
+            rows = _fetch_rows("AND m.status != 'archived'")
 
-        if text_only:
-            query += " AND q.content_type = 'text'"
+        # Fallback 2: If still no rows, check if no active MCQs exist for this subject at all and generate on-the-fly
+        if not rows:
+            cursor.execute(
+                """
+                SELECT COUNT(*) FROM mcq_bank m
+                JOIN questions q ON m.question_id = q.id
+                JOIN papers p ON q.paper_id = p.id
+                WHERE p.subject_id = ? AND m.status != 'archived';
+                """,
+                (subject_id,),
+            )
+            if cursor.fetchone()[0] == 0:
+                from modules.mcq_builder import generate_mcqs_for_subject
+                generate_mcqs_for_subject(subject_id)
+                rows = _fetch_rows("AND m.status != 'archived'")
 
-        query += " ORDER BY q.marks DESC, p.year DESC LIMIT ?;"
-        params.append(limit)
+        # Find questions the student answered correctly in their most recent attempts
+        recent_correct_qids = set()
+        if student_id:
+            cursor.execute(
+                """
+                SELECT sr.question_id 
+                FROM student_responses sr
+                JOIN student_attempts sa ON sr.attempt_id = sa.id
+                WHERE sa.student_id = ? AND sa.subject_id = ? AND sr.is_correct = 1
+                ORDER BY sa.created_at DESC LIMIT 50;
+                """,
+                (student_id, subject_id),
+            )
+            recent_correct_qids = {r[0] for r in cursor.fetchall()}
 
-        cursor.execute(query, tuple(params))
-        rows = [dict(r) for r in cursor.fetchall()]
+    if not rows:
+        return []
+
+    # Adaptive weighting: boost weak topics, down-weight recent correct
+    pool_indices = list(range(len(rows)))
+    weights = []
+    for r in rows:
+        w = 1.0
+        if weak_topics and r.get("topic") in weak_topics:
+            w += 2.0
+        if r["id"] in recent_correct_qids:
+            w *= 0.3
+        weights.append(max(0.01, w))
+
+    # Sample without replacement using calculated weights
+    sample_size = min(limit, len(rows))
+    chosen_indices: List[int] = []
+    temp_indices = list(pool_indices)
+    temp_weights = list(weights)
+
+    for _ in range(sample_size):
+        if not temp_indices:
+            break
+        chosen = random.choices(temp_indices, weights=temp_weights, k=1)[0]
+        chosen_indices.append(chosen)
+        idx_in_temp = temp_indices.index(chosen)
+        temp_indices.pop(idx_in_temp)
+        temp_weights.pop(idx_in_temp)
 
     quiz_items = []
-    for row in rows:
+    for idx in chosen_indices:
+        row = rows[idx]
         q_id = row["id"]
         quiz_items.append({
             "question_id": q_id,
@@ -97,6 +160,58 @@ def load_quiz_questions(
     return quiz_items
 
 
+def load_questions_by_ids(question_ids: List[int]) -> List[Dict[str, Any]]:
+    """Loads specific questions by their question IDs using non-archived MCQs."""
+    if not question_ids:
+        return []
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        placeholders = ",".join(["?"] * len(question_ids))
+        query = f"""
+            SELECT 
+                q.id, q.question_number, q.question_text, q.content_type, 
+                q.image_path, q.marks, q.unit, q.topic, p.year, p.exam_type,
+                m.option_a, m.option_b, m.option_c, m.option_d, m.correct_option, m.explanation, m.status
+            FROM mcq_bank m
+            JOIN questions q ON m.question_id = q.id
+            JOIN papers p ON q.paper_id = p.id
+            WHERE q.id IN ({placeholders}) AND m.status != 'archived'
+            ORDER BY CASE m.status WHEN 'verified' THEN 1 ELSE 2 END;
+        """
+        cursor.execute(query, tuple(question_ids))
+        rows = [dict(r) for r in cursor.fetchall()]
+
+    seen_qids = set()
+    quiz_items = []
+    for row in rows:
+        q_id = row["id"]
+        if q_id in seen_qids:
+            continue
+        seen_qids.add(q_id)
+        quiz_items.append({
+            "question_id": q_id,
+            "question_number": row["question_number"],
+            "question_text": row["question_text"],
+            "content_type": row["content_type"],
+            "image_path": row["image_path"],
+            "marks": row["marks"],
+            "unit": row["unit"],
+            "topic": row["topic"],
+            "year": row["year"],
+            "exam_type": row["exam_type"],
+            "options": {
+                "A": row["option_a"],
+                "B": row["option_b"],
+                "C": row["option_c"],
+                "D": row["option_d"],
+                "E": "🚫 Not in my syllabus / Skip",
+            },
+            "correct_option": row["correct_option"],
+            "explanation": row["explanation"],
+        })
+    return quiz_items
+
+
 def load_remedial_quiz_questions(
     subject_id: int,
     weak_topics: List[str],
@@ -117,7 +232,7 @@ def load_remedial_quiz_questions(
             FROM mcq_bank m
             JOIN questions q ON m.question_id = q.id
             JOIN papers p ON q.paper_id = p.id
-            WHERE p.subject_id = ? AND q.topic IN ({placeholders})
+            WHERE p.subject_id = ? AND q.topic IN ({placeholders}) AND m.status != 'archived'
             ORDER BY q.marks DESC LIMIT ?;
         """
         params = [subject_id] + weak_topics + [limit]
