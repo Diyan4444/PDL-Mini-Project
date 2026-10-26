@@ -69,9 +69,3 @@ streamlit run app.py
 Open your browser at `http://localhost:8501`.
 
 ---
-
-## 🔒 Security & Admin Access
-To access the Administrator Management Portal:
-1. Open the sidebar and click **🔑 Login / Admin Access** -> **Admin Login**.
-2. Enter `diyanshah2301@gmail.com` and passcode `admin123`.
-3. The **🛡️ Admin Management Portal** menu will now appear in your sidebar navigation.
