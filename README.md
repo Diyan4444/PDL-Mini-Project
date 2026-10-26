@@ -40,14 +40,14 @@ A complete, production-grade academic system built in **100% Python** using **St
 - **Data Volume Recommendation**: For reliable predictions, a **minimum of 3 years of papers** is recommended. When fewer years are available, a clear low-data warning is presented and predictions remain indicative.
 - **Contribution Breakdown & Export**: Stacked component bars show the exact point contribution of Frequency, Recency, Gap, and Marks, with one-click CSV export.
 
-### 5. Back-Testing Engine (Leak-Free)
-- Evaluates prediction accuracy strictly using papers prior to the test year ($Y < T$).
-- Features rolling back-tests comparing hit rate against a naive recency baseline over historical exam cycles.
+### 5. Back-Testing & Mock Exam Generator
+- **Leak-Free Back-Testing**: Evaluates prediction accuracy strictly using papers prior to the test year ($Y < T$) against rolling recency baselines.
+- **Simulated Blueprint Mock Exams**: Assembles 40-mark Midterm (Units 1–2) and 100-mark Endterm (Units 1–5) exam blueprints with full-width, high-resolution question snippet crops for crisp readability of mathematical formulas, code, and circuit diagrams.
 
 ### 6. Student Accounts & Adaptive Quiz Bank
 - **Secure Student Authentication**: Salted PBKDF2-HMAC-SHA256 password hashing with registration and login sub-tabs. Student IDs are strictly derived from authenticated accounts.
 - **Rule-Based & Verified MCQs**:
-  - Deterministic generators create questions testing topic classification (`rule_based_topic`), cognitive task verb identification (`rule_based_task`), and historical repetition (`rule_based_repeat`).
+  - Deterministic generators create questions testing topic classification (`rule_based_topic`), cognitive task verbs (`rule_based_task`), and historical repetition (`rule_based_repeat`). Automatically generates on-the-fly if no active MCQs exist for a subject.
   - Instructors can author verified subject-matter MCQs via the admin portal.
   - Archived legacy placeholder MCQs are preserved in the database for audit integrity but excluded from student quizzes.
 - **Adaptive Question Selection**: Biased toward a student's unmastered weak topics while down-weighting questions recently answered correctly.
