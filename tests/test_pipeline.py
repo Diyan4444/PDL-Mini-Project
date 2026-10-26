@@ -234,5 +234,8 @@ def test_concatenated_fixtures():
         assert detected[2]["metadata"]["is_makeup"]["value"] == 0
 
     finally:
-        if os.path.exists(tmp_concat_path):
-            os.remove(tmp_concat_path)
+        try:
+            if os.path.exists(tmp_concat_path):
+                os.remove(tmp_concat_path)
+        except Exception:
+            pass

@@ -21,6 +21,8 @@ from modules.database import (
     merge_tags,
     toggle_tag_active,
     get_unreviewed_questions,
+    get_questions_for_review,
+    approve_all_high_confidence_questions,
     update_question_details,
     get_question_tags,
     update_question_tags,
@@ -788,30 +790,112 @@ elif selected_page == "🛡️ Admin Management Portal":
 
     # SUB-TAB 2: REVIEW QUEUE
     with tab_review:
-        st.subheader("🔍 Low-Confidence Extraction Review Queue")
-        st.write("Questions with confidence scores < 80% or unparsed marks are routed here for verification:")
+        st.subheader("🔍 Question Extraction & Confidence Review Queue")
+        st.caption("Inspect, edit, and verify questions extracted across all subjects and past examination papers.")
 
-        unreviewed = get_unreviewed_questions()
-        if not unreviewed:
-            st.success("✅ All extracted questions have been verified and approved!")
+        all_subs_review = get_all_subjects()
+        col_f1, col_f2, col_f3 = st.columns([2, 2, 1])
+
+        with col_f1:
+            sub_filter_names = ["All Subjects"] + [s["name"] for s in all_subs_review]
+            sel_sub_filter = st.selectbox("Filter by Subject", sub_filter_names, key="rev_sub_filter")
+            chosen_sub_id = None
+            if sel_sub_filter != "All Subjects":
+                chosen_sub_id = next(s["id"] for s in all_subs_review if s["name"] == sel_sub_filter)
+
+        with col_f2:
+            status_filter_choice = st.selectbox(
+                "Review Status",
+                ["⚠️ Unreviewed & Needs Review", "📋 All Ingested Questions", "✅ Approved / Reviewed"],
+                key="rev_status_filter"
+            )
+            status_arg = "unreviewed"
+            if "All" in status_filter_choice:
+                status_arg = "all"
+            elif "Approved" in status_filter_choice:
+                status_arg = "reviewed"
+
+        with col_f3:
+            page_size_choice = st.selectbox("Per Page", [10, 25, 50, "All"], index=1, key="rev_page_size")
+
+        # Fetch questions based on user's exact filter
+        review_questions = get_questions_for_review(subject_id=chosen_sub_id, status_filter=status_arg)
+        all_db_tags = [t["name"] for t in get_all_tags(active_only=True)]
+
+        col_act1, col_act2 = st.columns([3, 2])
+        with col_act1:
+            st.write(f"Showing **{len(review_questions)}** question(s) matching `{status_filter_choice}` for `{sel_sub_filter}`:")
+
+        with col_act2:
+            # 1-Click bulk approve high confidence
+            unapproved_high = [q for q in review_questions if (q.get("confidence_score") or 0.0) >= 0.80 and not q.get("is_reviewed")]
+            if unapproved_high:
+                if st.button(f"⚡ Approve All High-Confidence ({len(unapproved_high)} Qs)", type="primary", key="btn_bulk_approve"):
+                    cnt = approve_all_high_confidence_questions(subject_id=chosen_sub_id, threshold=0.80)
+                    st.success(f"Approved {cnt} high-confidence questions!")
+                    st.rerun()
+
+        if not review_questions:
+            if status_arg == "unreviewed":
+                st.success("🎉 All extracted questions have been verified! Switch to 'All Ingested Questions' to browse all questions.")
+            else:
+                st.info("No questions found matching the selected filters.")
         else:
-            st.info(f"{len(unreviewed)} questions currently awaiting admin review.")
-            all_db_tags = [t["name"] for t in get_all_tags(active_only=True)]
+            # Pagination logic
+            limit_val = len(review_questions) if page_size_choice == "All" else int(page_size_choice)
+            total_pages = max(1, (len(review_questions) + limit_val - 1) // limit_val)
+            
+            if "rev_current_page" not in st.session_state:
+                st.session_state.rev_current_page = 1
+            if st.session_state.rev_current_page > total_pages:
+                st.session_state.rev_current_page = total_pages
 
-            for q in unreviewed[:10]:
+            cur_p = st.session_state.rev_current_page
+            start_q_idx = (cur_p - 1) * limit_val
+            end_q_idx = min(len(review_questions), start_q_idx + limit_val)
+            page_slice = review_questions[start_q_idx:end_q_idx]
+
+            # Render questions
+            for q in page_slice:
                 q_id = q["id"]
-                st.markdown(f"#### Question #{q['question_number']} | Paper ID: {q['paper_id']} ({q['year']} {q['exam_type'].upper()})")
-                
+                conf_val = float(q.get("confidence_score") or 0.0)
+                conf_pct = int(conf_val * 100)
+                if conf_val >= 0.80:
+                    badge_str = f":green[🟢 Confidence: {conf_pct}%]"
+                elif conf_val >= 0.60:
+                    badge_str = f":orange[🟡 Confidence: {conf_pct}%]"
+                else:
+                    badge_str = f":red[🔴 Low Confidence: {conf_pct}%]"
+
+                approved_str = "✅ Approved" if q.get("is_reviewed") else "⚠️ Pending Review"
+
+                st.markdown(
+                    f"#### Question #{q['question_number']} | {q.get('subject_name', '')} ({q['year']} {q['exam_type'].upper()}) — {badge_str} | `{approved_str}`"
+                )
+
                 col_ed1, col_ed2 = st.columns([2, 1])
                 with col_ed1:
-                    new_text = st.text_area("Question Text", q["question_text"], key=f"rev_text_{q_id}", height=120)
-                    if q["image_path"] and os.path.exists(q["image_path"]):
-                        st.image(q["image_path"], caption="Extracted Diagram", width=220)
+                    new_text = st.text_area(
+                        "Question Text",
+                        q["question_text"],
+                        key=f"rev_text_{q_id}",
+                        height=110,
+                    )
+                    
+                    # Display snippet or figure image if present
+                    c_img1, c_img2 = st.columns(2)
+                    with c_img1:
+                        if q.get("image_path") and os.path.exists(q["image_path"]):
+                            st.image(q["image_path"], caption=f"Question Snippet #{q['question_number']}", use_container_width=True)
+                    with c_img2:
+                        if q.get("figure_path") and os.path.exists(q["figure_path"]):
+                            st.image(q["figure_path"], caption="Extracted Diagram/Figure", use_container_width=True)
 
                 with col_ed2:
-                    new_marks = st.number_input("Marks", value=float(q["marks"]), min_value=1.0, max_value=30.0, step=0.5, key=f"rev_m_{q_id}")
-                    new_unit = st.number_input("Unit", value=int(q["unit"]), min_value=1, max_value=10, key=f"rev_u_{q_id}")
-                    new_topic = st.text_input("Topic Name", value=q["topic"], key=f"rev_top_{q_id}")
+                    new_q_num = st.text_input("Question Label", value=str(q.get("question_number", "")), key=f"rev_qnum_{q_id}")
+                    new_marks = st.number_input("Marks", value=float(q["marks"] or 5.0), min_value=1.0, max_value=30.0, step=0.5, key=f"rev_m_{q_id}")
+                    new_unit = st.number_input("Unit", value=int(q["unit"] or 1), min_value=1, max_value=10, key=f"rev_u_{q_id}")
+                    new_topic = st.text_input("Topic Name", value=q["topic"] or "General", key=f"rev_top_{q_id}")
 
                 # INTERACTIVE GLOWING TOGGLE TAGS
                 st.markdown("##### 🏷️ Assign / Toggle Tags (Multi-select with Green Glow):")
@@ -820,7 +904,6 @@ elif selected_page == "🛡️ Admin Management Portal":
                 if session_tag_key not in st.session_state:
                     st.session_state[session_tag_key] = set(current_assigned_tags)
 
-                # Render tag buttons horizontally
                 tag_cols = st.columns(6)
                 for t_idx, tag_name in enumerate(all_db_tags):
                     col_target = tag_cols[t_idx % 6]
@@ -840,7 +923,7 @@ elif selected_page == "🛡️ Admin Management Portal":
                                 st.session_state[session_tag_key].add(tag_name)
                             st.rerun()
 
-                # Action Button to Commit Review
+                # Save and Approve Button
                 if st.button(f"💾 Save & Approve Question #{q['question_number']}", key=f"btn_save_q_{q_id}", type="primary"):
                     final_tags = list(st.session_state[session_tag_key])
                     update_question_details(
@@ -850,6 +933,7 @@ elif selected_page == "🛡️ Admin Management Portal":
                         unit=new_unit,
                         topic=new_topic,
                         is_reviewed=True,
+                        question_number=new_q_num,
                     )
                     update_question_tags(q_id, final_tags)
                     log_action(
@@ -857,10 +941,24 @@ elif selected_page == "🛡️ Admin Management Portal":
                         action="APPROVE_QUESTION",
                         details=f"Question ID {q_id} approved with tags {final_tags}.",
                     )
-                    st.success(f"Question #{q['question_number']} approved.")
+                    st.success(f"Question #{new_q_num} approved successfully!")
                     st.rerun()
 
                 st.markdown("---")
+
+            # Pagination Controls
+            if total_pages > 1:
+                c_prev, c_pg_info, c_next = st.columns([1, 2, 1])
+                with c_prev:
+                    if st.button("⬅️ Previous", disabled=(cur_p <= 1), key="btn_prev_page", use_container_width=True):
+                        st.session_state.rev_current_page = max(1, cur_p - 1)
+                        st.rerun()
+                with c_pg_info:
+                    st.markdown(f"<div style='text-align:center; padding-top:8px;'><b>Page {cur_p} of {total_pages}</b> (Showing {start_q_idx+1}-{end_q_idx} of {len(review_questions)})</div>", unsafe_allow_html=True)
+                with c_next:
+                    if st.button("Next ➡️", disabled=(cur_p >= total_pages), key="btn_next_page", use_container_width=True):
+                        st.session_state.rev_current_page = min(total_pages, cur_p + 1)
+                        st.rerun()
 
     # SUB-TAB 3: MCQ BANK VERIFICATION
     with tab_mcqs:

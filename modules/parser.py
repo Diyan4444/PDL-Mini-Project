@@ -383,6 +383,52 @@ def parse_page_questions(
         open_question_from_prev_page = None
 
     if not merged_delims:
+        if content_items and len(content_items) >= 2:
+            # Fallback extraction: extract visible text on page as readable question so nothing is lost
+            full_content_text = " ".join(str(it[1]).strip() for it in content_items)
+            marks, co_tag, marks_found = parse_marks_and_co(full_content_text)
+            
+            y_min_all = int(min(pt[1] for it in content_items for pt in it[0]))
+            y_max_all = int(max(pt[1] for it in content_items for pt in it[0]))
+            
+            crop_y1 = max(0, y_min_all - 10)
+            crop_y2 = min(h_img, y_max_all + 10)
+            crop_path = None
+            if (crop_y2 - crop_y1) >= 40:
+                crop_filename = f"snippet_p{paper_id}_pg{page_no}_fallback_{uuid.uuid4().hex[:6]}.png"
+                dest_crop = os.path.join(DIAGRAM_ASSETS_DIR, crop_filename)
+                cv2.imwrite(dest_crop, page_img_bgr[crop_y1:crop_y2, :])
+                crop_path = dest_crop
+
+            figs = detect_isolated_figures(page_img_bgr, content_items, y_min_all, y_max_all)
+            
+            conf_score = calculate_confidence_score(
+                text=full_content_text,
+                marks_found=marks_found,
+                is_ocr=True,
+                has_snippet=(crop_path is not None),
+            )
+            conf_score = min(conf_score, 0.65)
+
+            results.append({
+                "question_number": f"{curr_parent}",
+                "parent_question_number": curr_parent,
+                "part_label": "a",
+                "question_text": full_content_text,
+                "marks": marks,
+                "co_tag": co_tag,
+                "unit": 1,
+                "topic": "General",
+                "confidence_score": conf_score,
+                "image_path": crop_path,
+                "figure_path": figs[0]["path"] if figs else None,
+                "figure_phash": figs[0]["phash"] if figs else None,
+                "tag_names": suggest_tags_from_text(full_content_text),
+                "page_no": page_no,
+                "is_continuation": 0,
+            })
+            curr_parent += 1
+
         return results, open_question_from_prev_page, curr_parent
 
     # 4. Extract Questions for each delimited row

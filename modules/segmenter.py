@@ -12,22 +12,38 @@ from modules.preprocess import preprocess_page_image
 HEADER_KEYWORDS = [
     r"EXAMINATION",
     r"DATE\s*OF\s*EXAM",
+    r"DATE\s*:",
     r"SEMESTER\s*[\&\+]\s*PROGRAM",
+    r"SEMESTER",
     r"COURSE\s*NAME",
+    r"COURSE\s*CODE",
     r"TIME\s*ALLOWED",
+    r"TIME\s*:",
     r"MAX\.?\s*MARKS",
+    r"MARKS\s*:",
     r"AUTONOMOUS\s*INSTITUTE",
     r"VEERMATA\s*JIJABAI",
     r"VJTI",
     r"INSTRUCTIONS",
+    r"MID\s*SEM(?:ESTER)?",
+    r"END\s*SEM(?:ESTER)?",
+    r"MAKE[-\s]?UP",
+    r"RE[-\s]?EXAM",
+    r"TEST\s*[12]",
+    r"QUESTION\s*PAPER",
 ]
 
-END_MARKERS = [
-    r"\bEND\s+OF\s+PAPER\b",
-    r"\bALL\s+THE\s+BEST\b",
-    r"\bBEST\s+OF\s+LUCK\b",
-    r"\*{5,}",
-    r"\-{5,}",
+STRONG_EXAM_PATTERNS = [
+    r"EXAMINATION",
+    r"MID\s*SEM(?:ESTER)?",
+    r"END\s*SEM(?:ESTER)?",
+    r"MAKE[-\s]?UP",
+    r"RE[-\s]?EXAM",
+    r"\bMSE\b",
+    r"\bESE\b",
+    r"SEMESTER\s*TEST",
+    r"DATE\s*OF\s*EXAM",
+    r"COURSE\s*NAME",
 ]
 
 
@@ -39,19 +55,32 @@ def classify_page_header(text_lines: List[str], word_count: int, quality_score: 
     if word_count < 5 and quality_score < 0.2:
         return "BLANK"
 
-    # Search top 20 lines for institutional header signatures
-    top_text = " ".join(text_lines[:20]).upper()
+    # Search top 25 lines for institutional header signatures
+    top_text = " ".join(text_lines[:25]).upper()
     
     matches = 0
     for kw in HEADER_KEYWORDS:
         if re.search(kw, top_text):
             matches += 1
 
-    # First page threshold: at least 3 distinct exam header keywords
-    if matches >= 3:
+    has_strong = any(re.search(pat, top_text) for pat in STRONG_EXAM_PATTERNS)
+
+    # First page threshold: at least 2 header keywords or 1 strong exam pattern + 1 secondary
+    if has_strong and matches >= 2:
+        return "FIRST_PAGE"
+    elif matches >= 3:
         return "FIRST_PAGE"
 
     return "CONTINUATION"
+
+
+END_MARKERS = [
+    r"\bEND\s+OF\s+PAPER\b",
+    r"\bALL\s+THE\s+BEST\b",
+    r"\bBEST\s+OF\s+LUCK\b",
+    r"\*{4,}",
+    r"\-{4,}",
+]
 
 
 def has_end_marker(text_lines: List[str]) -> bool:
@@ -173,18 +202,28 @@ def segment_pdf(
     curr_first_page_idx = None
 
     for i, p in enumerate(page_records):
-        if p["page_type"] == "FIRST_PAGE":
-            if curr_start is not None:
-                # Close previous paper at previous page
-                papers_spans.append({
-                    "start": curr_start,
-                    "end": page_records[i - 1]["page_num"],
-                    "first_page_idx": curr_first_page_idx,
-                })
+        if p["page_type"] == "BLANK":
+            continue
+
+        # Check if question numbering explicitly restarts at 1 on this page
+        starts_q1 = any(re.search(r"^(?:Q(?:uestion)?\s*[\.\:\-\)]?\s*1\b|\b1\s*[\.\)\:]|\bQ\.?Nos?\b)", l.strip(), re.I) for l in p["text_lines"][:12])
+        is_first = (p["page_type"] == "FIRST_PAGE") or (starts_q1 and curr_start is not None and i > curr_first_page_idx)
+
+        if curr_start is None:
+            # Begin a paper on the first non-blank page
             curr_start = p["page_num"]
             curr_first_page_idx = i
-        elif p["is_end"] and curr_start is not None:
-            # End marker reached
+        elif is_first:
+            # Close previous paper and begin new paper here
+            papers_spans.append({
+                "start": curr_start,
+                "end": page_records[i - 1]["page_num"],
+                "first_page_idx": curr_first_page_idx,
+            })
+            curr_start = p["page_num"]
+            curr_first_page_idx = i
+        elif p["is_end"]:
+            # Formal end marker reached on this page
             papers_spans.append({
                 "start": curr_start,
                 "end": p["page_num"],

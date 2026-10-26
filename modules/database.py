@@ -656,32 +656,70 @@ def update_question_tags(question_id: int, tag_names: List[str]):
 
 
 def get_unreviewed_questions(subject_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    return get_questions_for_review(subject_id=subject_id, status_filter="unreviewed")
+
+
+def get_questions_for_review(
+    subject_id: Optional[int] = None,
+    paper_id: Optional[int] = None,
+    status_filter: str = "unreviewed",  # "unreviewed", "all", "reviewed"
+) -> List[Dict[str, Any]]:
+    """Retrieves questions for administrative verification with flexible filtering."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        query = """
+            SELECT q.*, p.year, p.exam_type, p.course_code, s.name as subject_name
+            FROM questions q
+            JOIN papers p ON q.paper_id = p.id
+            JOIN subjects s ON p.subject_id = s.id
+            WHERE 1=1
+        """
+        params: List[Any] = []
+        if subject_id:
+            query += " AND p.subject_id = ?"
+            params.append(subject_id)
+        if paper_id:
+            query += " AND p.id = ?"
+            params.append(paper_id)
+
+        if status_filter == "unreviewed":
+            query += " AND (q.is_reviewed = 0 OR q.confidence_score < 0.80)"
+        elif status_filter == "reviewed":
+            query += " AND q.is_reviewed = 1"
+        # "all" imposes no filter on is_reviewed
+
+        query += " ORDER BY q.confidence_score ASC, p.year DESC, q.id ASC;"
+        cursor.execute(query, tuple(params))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def approve_all_high_confidence_questions(
+    subject_id: Optional[int] = None,
+    threshold: float = 0.80,
+) -> int:
+    """Batch approves all unreviewed questions meeting or exceeding confidence threshold."""
     with get_db_connection() as conn:
         cursor = conn.cursor()
         if subject_id:
             cursor.execute(
                 """
-                SELECT q.*, p.year, p.exam_type, s.name as subject_name
-                FROM questions q
-                JOIN papers p ON q.paper_id = p.id
-                JOIN subjects s ON p.subject_id = s.id
-                WHERE q.is_reviewed = 0 AND p.subject_id = ?
-                ORDER BY q.confidence_score ASC, q.id DESC;
+                UPDATE questions SET is_reviewed = 1
+                WHERE confidence_score >= ? AND is_reviewed = 0
+                AND paper_id IN (SELECT id FROM papers WHERE subject_id = ?);
                 """,
-                (subject_id,),
+                (threshold, subject_id),
             )
         else:
             cursor.execute(
                 """
-                SELECT q.*, p.year, p.exam_type, s.name as subject_name
-                FROM questions q
-                JOIN papers p ON q.paper_id = p.id
-                JOIN subjects s ON p.subject_id = s.id
-                WHERE q.is_reviewed = 0
-                ORDER BY q.confidence_score ASC, q.id DESC;
-                """
+                UPDATE questions SET is_reviewed = 1
+                WHERE confidence_score >= ? AND is_reviewed = 0;
+                """,
+                (threshold,),
             )
-        return [dict(row) for row in cursor.fetchall()]
+        count = cursor.rowcount
+        conn.commit()
+        return count
 
 
 def update_question_details(
