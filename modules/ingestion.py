@@ -55,6 +55,17 @@ def compute_file_sha256(file_bytes: bytes) -> str:
     return hashlib.sha256(file_bytes).hexdigest()
 
 
+def download_drive_file(drive_url: str, output_path: str) -> bool:
+    """Downloads a public Google Drive file using gdown."""
+    try:
+        import gdown
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        gdown.download(url=drive_url, output=output_path, quiet=False, fuzzy=True)
+        return os.path.exists(output_path) and os.path.getsize(output_path) > 100
+    except Exception:
+        return False
+
+
 def validate_pdf_bytes(file_bytes: bytes) -> Tuple[bool, str]:
     """Validates that bytes represent a valid PDF within constraints (<= 150 pages, <= 100MB)."""
     if not file_bytes:
