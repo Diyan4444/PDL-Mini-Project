@@ -1,0 +1,9 @@
+.streamlit/secrets.toml
+data/*.db
+data/*.db-wal
+data/*.db-shm
+assets/diagrams/*.png
+assets/exports/*.pdf
+__pycache__/
+*.pyc
+.env
