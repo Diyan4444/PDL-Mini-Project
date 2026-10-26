@@ -155,7 +155,13 @@ with st.sidebar:
     if has_admin_priv:
         menu_options.append("🛡️ Admin Management Portal")
 
-    selected_page = st.radio("Select View", menu_options, index=0)
+    # Keep track of active navigation
+    default_idx = 0
+    if "nav_selection" in st.session_state and st.session_state.nav_selection in menu_options:
+        default_idx = menu_options.index(st.session_state.nav_selection)
+
+    selected_page = st.radio("Select View", menu_options, index=default_idx)
+    st.session_state.nav_selection = selected_page
 
 # ==============================================================================
 # VIEW 1: PREDICTIONS & LIKELIHOOD DASHBOARD
