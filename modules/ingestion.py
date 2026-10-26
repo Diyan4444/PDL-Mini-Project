@@ -7,9 +7,10 @@ import tempfile
 from typing import Any, Dict, List, Optional, Tuple
 import pymupdf as fitz
 from PIL import Image
-import pytesseract
+import numpy as np
 
 from modules.database import (
+    get_db_connection,
     add_paper,
     add_question,
     add_mcq,
@@ -19,11 +20,23 @@ from modules.database import (
 from modules.hashing import compute_image_phash, find_or_create_diagram_group
 from modules.parser import (
     calculate_confidence_score,
-    crop_page_images,
-    extract_marks_from_text,
-    split_text_into_questions,
+    extract_page_question_blocks_with_crops,
     suggest_tags_from_text,
 )
+
+_RAPID_OCR_ENGINE = None
+
+
+def get_rapid_ocr():
+    """Initializes and returns cached RapidOCR instance."""
+    global _RAPID_OCR_ENGINE
+    if _RAPID_OCR_ENGINE is None:
+        try:
+            from rapidocr_onnxruntime import RapidOCR
+            _RAPID_OCR_ENGINE = RapidOCR()
+        except Exception:
+            _RAPID_OCR_ENGINE = False
+    return _RAPID_OCR_ENGINE
 
 
 def compute_file_sha256(file_bytes: bytes) -> str:
@@ -41,20 +54,6 @@ def download_drive_file(drive_url: str, output_path: str) -> bool:
         return False
 
 
-def run_ocr_on_page(page: fitz.Page) -> str:
-    """Renders page to high-DPI image and extracts text using Tesseract OCR."""
-    try:
-        zoom = 2.0  # 144 DPI
-        mat = fitz.Matrix(zoom, zoom)
-        pix = page.get_pixmap(matrix=mat)
-        img = Image.open(io.BytesIO(pix.tobytes("png")))
-        ocr_text = pytesseract.image_to_string(img, config="--oem 3 --psm 6")
-        return ocr_text
-    except Exception:
-        # Fallback if tesseract executable is not installed or raises an error
-        return ""
-
-
 def process_pdf_document(
     file_bytes: bytes,
     original_filename: str,
@@ -64,11 +63,9 @@ def process_pdf_document(
     exam_type: str,
     actor_email: str = "diyanshah2301@gmail.com",
 ) -> Tuple[bool, str, Dict[str, Any]]:
-    """Complete ingestion pipeline: validation, text parsing, OCR fallback,
-    diagram extraction, hashing, splitting, confidence evaluation, and database commits.
-    
-    Returns:
-        (success_bool, message, summary_dict)
+    """Complete ingestion pipeline with Option 2 Visual Question Cropping:
+    Extracts clubbed questions (1A+1B+1C), crops high-resolution question snippets
+    preserving all math symbols, and stores database records.
     """
     file_hash = compute_file_sha256(file_bytes)
     
@@ -100,66 +97,66 @@ def process_pdf_document(
     total_pages = len(doc)
     parsed_questions_count = 0
     low_confidence_count = 0
-    extracted_diagrams_count = 0
+    extracted_snippets_count = 0
+    ocr_engine = get_rapid_ocr()
 
-    accumulated_full_text = ""
-    page_crops_map: Dict[int, List[Dict[str, Any]]] = {}
+    all_page_questions: List[Dict[str, Any]] = []
 
-    # 4. Read pages, extract visuals, and apply OCR if necessary
+    # 4. Process each page: render high-res image & extract clubbed question blocks with visual crops
     for page_idx in range(total_pages):
         page = doc[page_idx]
-        direct_text = page.get_text("text").strip()
-        is_page_ocr = False
+        
+        # Render high-res page image (150 DPI)
+        pix = page.get_pixmap(dpi=150)
+        page_img = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
+        img_np = np.array(page_img)
 
-        # If page has very little selectable text, trigger OCR fallback
-        if len(direct_text) < 150:
-            ocr_text = run_ocr_on_page(page)
-            if len(ocr_text) > len(direct_text):
-                direct_text = ocr_text
-                is_page_ocr = True
+        # Run OCR
+        ocr_result = []
+        if ocr_engine:
+            res, _ = ocr_engine(img_np)
+            if res:
+                ocr_result = res
 
-        accumulated_full_text += f"\n--- Page {page_idx + 1} ---\n" + direct_text
+        # Extract clubbed questions with image snippets
+        page_q_blocks = extract_page_question_blocks_with_crops(
+            page_img=page_img,
+            ocr_lines=ocr_result,
+            paper_id=paper_id,
+            page_idx=page_idx,
+        )
 
-        # Extract embedded images and diagrams
-        crops = crop_page_images(page, paper_id, page_idx)
-        if crops:
-            page_crops_map[page_idx] = crops
-            extracted_diagrams_count += len(crops)
+        for q in page_q_blocks:
+            all_page_questions.append(q)
 
     doc.close()
 
-    # 5. Split document into individual question items
-    raw_questions = split_text_into_questions(accumulated_full_text)
+    if not all_page_questions:
+        with get_db_connection() as conn:
+            conn.execute("DELETE FROM papers WHERE id = ?;", (paper_id,))
+            conn.commit()
+        return False, "Failed to parse questions: No legible text or question boundaries (e.g. Q.1, Q.2) could be extracted from this document.", {}
 
-    # 6. Process each question, classify visuals, compute pHash, evaluate confidence
-    all_crops_flat = [crop for sublist in page_crops_map.values() for crop in sublist]
-    crop_cursor = 0
-
-    for idx, q_data in enumerate(raw_questions):
+    # 5. Commit questions with visual crops, pHash, tags & confidence scores
+    for idx, q_data in enumerate(all_page_questions):
         q_num = q_data["question_number"]
         q_text = q_data["question_text"]
-        
-        marks, marks_found = extract_marks_from_text(q_text, default_marks=5.0)
-        auto_tags = suggest_tags_from_text(q_text)
+        image_path = q_data.get("image_path")
+        marks = q_data.get("marks", 5.0)
+        marks_found = q_data.get("marks_found", True)
 
-        content_type = "text"
-        image_path = None
+        auto_tags = suggest_tags_from_text(q_text)
         phash_val = None
         diagram_grp_id = None
 
-        # Associate visual crop if question contains diagram keywords or if visual is available
-        has_diagram_kw = any(t in auto_tags for t in ["diagram", "draw", "graph", "architecture"])
-        if has_diagram_kw and crop_cursor < len(all_crops_flat):
-            chosen_crop = all_crops_flat[crop_cursor]
-            crop_cursor += 1
-            content_type = "diagram"
-            image_path = chosen_crop["path"]
+        if image_path:
+            extracted_snippets_count += 1
             phash_val = compute_image_phash(image_path)
             if phash_val:
                 grp_id, _, _ = find_or_create_diagram_group(phash_val, max_hamming_distance=5)
                 diagram_grp_id = grp_id
-        
-        # Estimate syllabus unit (approximate based on question number sequence: Q1/Q2 -> Unit 1, etc.)
+
+        # Estimate syllabus unit
         try:
             num_int = int(re.sub(r"\D", "", q_num)) if re.sub(r"\D", "", q_num) else (idx + 1)
             estimated_unit = max(1, min(5, (num_int + 1) // 2))
@@ -169,8 +166,8 @@ def process_pdf_document(
         confidence = calculate_confidence_score(
             text=q_text,
             marks_found=marks_found,
-            is_ocr=False,
-            has_diagram=(image_path is not None)
+            is_ocr=True,
+            has_snippet=(image_path is not None),
         )
         is_reviewed = (confidence >= 0.80)
         if not is_reviewed:
@@ -181,7 +178,7 @@ def process_pdf_document(
             paper_id=paper_id,
             question_number=q_num,
             question_text=q_text,
-            content_type=content_type,
+            content_type="diagram" if image_path else "text",
             image_path=image_path,
             phash=phash_val,
             diagram_group_id=diagram_grp_id,
@@ -195,28 +192,29 @@ def process_pdf_document(
         parsed_questions_count += 1
 
         # Seed initial starter MCQ entry for student quiz bank
+        preview_text = q_text[:50].replace("\n", " ")
         add_mcq(
             question_id=q_id,
-            option_a=f"Standard primary concept in {q_text[:30]}...",
+            option_a=f"Primary analytical solution for Question {q_num}",
             option_b="Secondary alternate implementation rule",
-            option_c="Neither: It represents an edge-case condition",
+            option_c="Neither: Represents an edge-case condition",
             option_d="Both primary concept and alternate rule apply",
             correct_option="A",
-            explanation=f"Based on historical analysis of past paper question {q_num} covering Unit {estimated_unit}.",
+            explanation=f"Official solution reference for Question {q_num} covering Unit {estimated_unit}.",
         )
 
     log_action(
         actor=actor_email,
         action="INGEST_PAPER",
-        details=f"Paper ID {paper_id} ingested. {parsed_questions_count} questions extracted ({low_confidence_count} need review).",
+        details=f"Paper ID {paper_id} ingested. {parsed_questions_count} clubbed questions extracted with visual snippets.",
     )
 
     summary = {
         "paper_id": paper_id,
         "total_pages": total_pages,
         "questions_parsed": parsed_questions_count,
-        "diagrams_extracted": extracted_diagrams_count,
+        "visual_snippets_cropped": extracted_snippets_count,
         "low_confidence_review_queue": low_confidence_count,
     }
 
-    return True, f"Successfully parsed and ingested {original_filename} ({parsed_questions_count} questions).", summary
+    return True, f"Successfully parsed {original_filename} into {parsed_questions_count} questions with high-resolution visual question snippets.", summary

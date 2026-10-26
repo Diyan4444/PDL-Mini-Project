@@ -8,6 +8,9 @@ from modules.database import (
     init_db,
     get_all_subjects,
     add_subject,
+    delete_subject,
+    delete_paper,
+    get_all_papers_detailed,
     get_all_tags,
     add_tag,
     merge_tags,
@@ -254,7 +257,7 @@ if selected_page == "📊 Predictions & Likelihood":
                 unsafe_allow_html=True,
             )
             if p["image_path"] and os.path.exists(p["image_path"]):
-                st.image(p["image_path"], caption=f"Extracted Figure (Cluster #{p['cluster_id']})", width=260)
+                st.image(p["image_path"], caption=f"Original Exam Question Snippet (Cluster #{p['cluster_id']})", use_container_width=True)
 
 
 # ==============================================================================
@@ -327,7 +330,7 @@ elif selected_page == "📝 Practice Quiz & MCQ Bank":
         )
 
         if q["image_path"] and os.path.exists(q["image_path"]):
-            st.image(q["image_path"], caption="Question Diagram / Formula", width=320)
+            st.image(q["image_path"], caption="Original Question Snippet (Formulas, Symbols & Diagrams)", use_container_width=True)
 
         # 5 Options including "Not in my syllabus / Skip"
         option_choices = [
@@ -623,10 +626,11 @@ elif selected_page == "🛡️ Admin Management Portal":
     st.title("🛡️ Administrator Management Portal")
     render_disclaimer()
 
-    tab_ingest, tab_review, tab_tags, tab_db = st.tabs([
+    tab_ingest, tab_review, tab_tags, tab_manage, tab_db = st.tabs([
         "📥 Ingest Question Papers",
         "🔍 Low-Confidence Review Queue",
         "🏷️ Tag & Syllabus Manager",
+        "🗑️ Manage / Delete Papers & Subjects",
         "💾 System Maintenance & DB",
     ])
 
@@ -811,7 +815,59 @@ elif selected_page == "🛡️ Admin Management Portal":
         active_tags_list = get_all_tags(active_only=False)
         st.dataframe(pd.DataFrame(active_tags_list), use_container_width=True)
 
-    # SUB-TAB 4: DB MAINTENANCE & RECOMPUTE
+    # SUB-TAB 4: MANAGE & DELETE PAPERS / SUBJECTS
+    with tab_manage:
+        st.subheader("🗑️ Manage & Remove Ingested Papers or Subjects")
+        st.write("Easily remove an incorrectly uploaded PDF paper or completely delete an outdated subject.")
+
+        col_m_p, col_m_s = st.columns(2)
+
+        # 1. DELETE SPECIFIC PAPER
+        with col_m_p:
+            st.markdown("### 📄 Remove a Specific Exam Paper (PDF)")
+            all_papers = get_all_papers_detailed()
+            if not all_papers:
+                st.info("No exam papers are currently in the database.")
+            else:
+                paper_options = {
+                    f"ID #{p['id']} - {p['subject_name']} ({p['year']} {p['exam_type'].upper()}) - {p['question_count']} Questions": p['id']
+                    for p in all_papers
+                }
+                chosen_paper_label = st.selectbox("Select Paper to Delete", list(paper_options.keys()), key="del_paper_select")
+                chosen_paper_id = paper_options[chosen_paper_label]
+
+                st.warning("⚠️ Deleting a paper will permanently delete its PDF file, all extracted question snippet images, tags, and MCQs.")
+                confirm_del_p = st.checkbox("Confirm permanent deletion of this paper", key="chk_confirm_p")
+                if st.button("🗑️ Delete Selected Paper", type="primary", disabled=not confirm_del_p, key="btn_del_paper"):
+                    ok = delete_paper(chosen_paper_id)
+                    if ok:
+                        st.success(f"Paper ID #{chosen_paper_id} and all related questions removed successfully.")
+                        st.rerun()
+                    else:
+                        st.error("Failed to delete paper.")
+
+        # 2. DELETE ENTIRE SUBJECT
+        with col_m_s:
+            st.markdown("### 📚 Remove an Entire Subject")
+            all_subs = get_all_subjects()
+            if not all_subs:
+                st.info("No subjects are registered.")
+            else:
+                sub_options = {s["name"]: s["id"] for s in all_subs}
+                chosen_sub_name = st.selectbox("Select Subject to Delete", list(sub_options.keys()), key="del_sub_select")
+                chosen_sub_id = sub_options[chosen_sub_name]
+
+                st.error(f"🚨 **Warning:** Deleting '{chosen_sub_name}' will permanently remove ALL associated PDF papers, question snippet images, past student quiz records, and syllabus settings.")
+                confirm_del_s = st.checkbox("Confirm permanent deletion of this entire subject", key="chk_confirm_s")
+                if st.button("🚨 Permanently Delete Subject", type="primary", disabled=not confirm_del_s, key="btn_del_sub"):
+                    ok = delete_subject(chosen_sub_id)
+                    if ok:
+                        st.success(f"Subject '{chosen_sub_name}' and all associated papers/questions have been deleted.")
+                        st.rerun()
+                    else:
+                        st.error("Failed to delete subject.")
+
+    # SUB-TAB 5: DB MAINTENANCE & RECOMPUTE
     with tab_db:
         st.subheader("💾 Database Maintenance & Predictions Recomputation")
         

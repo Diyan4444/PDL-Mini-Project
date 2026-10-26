@@ -516,6 +516,102 @@ def get_mcq_by_question_id(question_id: int) -> Optional[Dict[str, Any]]:
         return dict(row) if row else None
 
 
+def get_paper_details(paper_id: int) -> Optional[Dict[str, Any]]:
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT p.*, s.name as subject_name, COUNT(q.id) as question_count
+            FROM papers p
+            JOIN subjects s ON p.subject_id = s.id
+            LEFT JOIN questions q ON p.id = q.paper_id
+            WHERE p.id = ?
+            GROUP BY p.id;
+            """,
+            (paper_id,),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+
+def get_all_papers_detailed() -> List[Dict[str, Any]]:
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT p.*, s.name as subject_name, COUNT(q.id) as question_count
+            FROM papers p
+            JOIN subjects s ON p.subject_id = s.id
+            LEFT JOIN questions q ON p.id = q.paper_id
+            GROUP BY p.id
+            ORDER BY s.name ASC, p.year DESC, p.exam_type ASC;
+            """
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def delete_paper(paper_id: int) -> bool:
+    """Removes a paper, its physical PDF, all associated cropped question images,
+    and all database questions, tags, and MCQs in cascade.
+    """
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        
+        # 1. Get paper file path
+        cursor.execute("SELECT file_path FROM papers WHERE id = ?;", (paper_id,))
+        p_row = cursor.fetchone()
+        if not p_row:
+            return False
+        paper_file_path = p_row["file_path"]
+
+        # 2. Get all question image paths
+        cursor.execute("SELECT image_path FROM questions WHERE paper_id = ? AND image_path IS NOT NULL;", (paper_id,))
+        img_rows = cursor.fetchall()
+        for img_r in img_rows:
+            img_p = img_r["image_path"]
+            if img_p and os.path.exists(img_p):
+                try:
+                    os.remove(img_p)
+                except Exception:
+                    pass
+
+        # 3. Delete physical PDF
+        if paper_file_path and os.path.exists(paper_file_path):
+            try:
+                os.remove(paper_file_path)
+            except Exception:
+                pass
+
+        # 4. Delete paper record (Cascade deletes questions, mcqs, question_tags)
+        cursor.execute("DELETE FROM papers WHERE id = ?;", (paper_id,))
+        conn.commit()
+
+        log_action("ADMIN", "DELETE_PAPER", f"Deleted paper ID {paper_id} and associated question assets.")
+        return True
+
+
+def delete_subject(subject_id: int) -> bool:
+    """Deletes an entire subject, removing all associated PDFs, question snippet images,
+    and cascading database records.
+    """
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        
+        # 1. Find all papers under this subject
+        cursor.execute("SELECT id FROM papers WHERE subject_id = ?;", (subject_id,))
+        paper_ids = [row["id"] for row in cursor.fetchall()]
+
+    for p_id in paper_ids:
+        delete_paper(p_id)
+
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM subjects WHERE id = ?;", (subject_id,))
+        conn.commit()
+        log_action("ADMIN", "DELETE_SUBJECT", f"Deleted subject ID {subject_id} and all related papers.")
+        return True
+
+
 # Database Backup & Export
 def export_database_json() -> str:
     """Serializes all primary tables into a JSON string for full data backup."""
