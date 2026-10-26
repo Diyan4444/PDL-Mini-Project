@@ -1,9 +1,11 @@
 .streamlit/secrets.toml
-data/*.db
-data/*.db-wal
-data/*.db-shm
-assets/diagrams/*.png
-assets/exports/*.pdf
+!.streamlit/secrets.toml.example
+data/
+assets/
+*.db
+*.db-wal
+*.db-shm
 __pycache__/
 *.pyc
 .env
+.venv/
