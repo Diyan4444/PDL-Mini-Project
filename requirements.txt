@@ -1,0 +1,2 @@
+# Optional dependency for formal verification
+sympy>=1.8,<=1.14.0
