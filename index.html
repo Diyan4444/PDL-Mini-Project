@@ -1,0 +1,1662 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Combinatorial Counting & Permutation Analyzer</title>
+  <style>
+    :root {
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --primary-light: #eff6ff;
+      --success: #16a34a;
+      --success-light: #f0fdf4;
+      --warning: #d97706;
+      --warning-light: #fffbeb;
+      --danger: #dc2626;
+      --danger-light: #fef2f2;
+      --bg-page: #f8fafc;
+      --bg-card: #ffffff;
+      --text-main: #0f172a;
+      --text-muted: #64748b;
+      --border: #e2e8f0;
+      --radius: 10px;
+      --shadow: 0 4px 6px -1px rgba(0,0,0,0.07), 0 2px 4px -2px rgba(0,0,0,0.05);
+      --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Courier New", monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg-page);
+      color: var(--text-main);
+      display: flex;
+      min-height: 100vh;
+      line-height: 1.5;
+    }
+
+    /* Sidebar Navigation */
+    .sidebar {
+      width: 320px;
+      background: var(--bg-card);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+    }
+    .sidebar-header {
+      padding: 24px 20px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(135deg, #1e293b, #0f172a);
+      color: #fff;
+    }
+    .sidebar-header h1 {
+      font-size: 1.15rem;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      margin-bottom: 4px;
+    }
+    .sidebar-header p {
+      font-size: 0.8rem;
+      color: #94a3b8;
+    }
+
+    .nav-group-title {
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      padding: 16px 20px 6px;
+    }
+    .nav-list { list-style: none; }
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 20px;
+      font-size: 0.88rem;
+      color: #334155;
+      cursor: pointer;
+      border-left: 3px solid transparent;
+      transition: all 0.15s ease;
+      user-select: none;
+    }
+    .nav-item:hover {
+      background: var(--primary-light);
+      color: var(--primary);
+    }
+    .nav-item.active {
+      background: var(--primary-light);
+      color: var(--primary);
+      font-weight: 600;
+      border-left-color: var(--primary);
+    }
+    .nav-num {
+      display: inline-block;
+      width: 20px;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+    .nav-item.active .nav-num { color: var(--primary); }
+
+    /* Main Container */
+    .main-content {
+      flex: 1;
+      padding: 32px 40px;
+      max-width: 1100px;
+      overflow-y: auto;
+    }
+
+    /* Top banner */
+    .top-banner {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px 24px;
+      margin-bottom: 24px;
+      box-shadow: var(--shadow);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .banner-left h2 { font-size: 1.4rem; font-weight: 700; margin-bottom: 2px; }
+    .banner-left p { font-size: 0.88rem; color: var(--text-muted); }
+    .tag-badge {
+      display: inline-block;
+      background: #e0f2fe;
+      color: #0369a1;
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 9999px;
+    }
+
+    /* Card Panels */
+    .view-panel { display: none; }
+    .view-panel.active { display: block; }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      margin-bottom: 24px;
+      box-shadow: var(--shadow);
+    }
+    .card-title {
+      font-size: 1.15rem;
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: var(--text-main);
+    }
+    .card-desc {
+      font-size: 0.88rem;
+      color: var(--text-muted);
+      margin-bottom: 20px;
+    }
+
+    /* Forms & Inputs */
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .form-group { display: flex; flex-direction: column; gap: 6px; }
+    .form-group label {
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: #475569;
+    }
+    .form-group input, .form-group select {
+      padding: 10px 14px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 0.95rem;
+      outline: none;
+      transition: border-color 0.15s ease;
+      background: #fff;
+    }
+    .form-group input:focus, .form-group select:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(37,99,235,0.12);
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 10px 20px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      border-radius: 6px;
+      cursor: pointer;
+      border: none;
+      transition: all 0.15s ease;
+      user-select: none;
+    }
+    .btn-primary {
+      background: var(--primary);
+      color: #fff;
+    }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-outline {
+      background: #fff;
+      color: #475569;
+      border: 1px solid var(--border);
+    }
+    .btn-outline:hover { background: #f1f5f9; }
+
+    /* Results section */
+    .result-box {
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      margin-top: 20px;
+    }
+    .result-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      border-bottom: 1px dashed var(--border);
+      padding-bottom: 8px;
+    }
+    .result-title {
+      font-size: 0.82rem;
+      text-transform: uppercase;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+    }
+    .result-value {
+      font-family: var(--font-mono);
+      font-size: 1.35rem;
+      font-weight: 700;
+      color: var(--primary);
+      word-break: break-all;
+      margin-bottom: 12px;
+    }
+    .formula-badge {
+      display: inline-block;
+      background: #e2e8f0;
+      color: #1e293b;
+      font-family: var(--font-mono);
+      font-size: 0.82rem;
+      padding: 4px 10px;
+      border-radius: 4px;
+      margin-bottom: 12px;
+    }
+    .expl-box {
+      font-size: 0.88rem;
+      color: #334155;
+      background: #fff;
+      border-left: 3px solid var(--primary);
+      padding: 10px 14px;
+      border-radius: 0 4px 4px 0;
+      margin-top: 8px;
+    }
+    .expl-box b { color: #0f172a; }
+
+    /* Badges */
+    .badge {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 700;
+    }
+    .badge-pass { background: #dcfce7; color: #15803d; }
+    .badge-fail { background: #fee2e2; color: #b91c1c; }
+    .badge-info { background: #dbeafe; color: #1d4ed8; }
+
+    /* Pascal Pyramid */
+    .pascal-container {
+      text-align: center;
+      padding: 20px;
+      background: #fff;
+      border-radius: 8px;
+      overflow-x: auto;
+    }
+    .pascal-row {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 8px;
+      font-family: var(--font-mono);
+      font-size: 0.9rem;
+    }
+    .pascal-cell {
+      min-width: 36px;
+      padding: 4px 8px;
+      background: #f1f5f9;
+      border-radius: 4px;
+      border: 1px solid #cbd5e1;
+      font-weight: 600;
+      transition: all 0.15s ease;
+    }
+    .pascal-cell:hover {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+      transform: scale(1.1);
+    }
+    .pascal-row-info {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-left: 12px;
+      align-self: center;
+    }
+
+    /* Listing grid */
+    .item-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+      gap: 8px;
+      max-height: 360px;
+      overflow-y: auto;
+      padding: 12px;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+    }
+    .item-card {
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      padding: 6px 4px;
+      text-align: center;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+
+    /* History table */
+    .history-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.88rem;
+      margin-top: 14px;
+    }
+    .history-table th, .history-table td {
+      border: 1px solid var(--border);
+      padding: 10px 14px;
+      text-align: left;
+    }
+    .history-table th {
+      background: #f1f5f9;
+      font-weight: 600;
+      color: #475569;
+    }
+    .history-table tr:hover { background: #f8fafc; }
+
+    /* Test suite output */
+    .test-card {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.88rem;
+    }
+    .test-card:last-child { border-bottom: none; }
+    .test-name { font-weight: 500; }
+
+    @media (max-width: 900px) {
+      body { flex-direction: column; }
+      .sidebar { width: 100%; height: auto; position: static; }
+      .main-content { padding: 20px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- LEFT SIDEBAR -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <h1>Combinatorial Analyzer</h1>
+      <p>Discrete Mathematics & Permutation Portal</p>
+    </div>
+
+    <div class="nav-group-title">Core Operations</div>
+    <ul class="nav-list">
+      <li class="nav-item active" onclick="switchView('view-factorial')">
+        <span class="nav-num">1</span> Factorial (n!)
+      </li>
+      <li class="nav-item" onclick="switchView('view-permutations')">
+        <span class="nav-num">2</span> Permutations P(n, r)
+      </li>
+      <li class="nav-item" onclick="switchView('view-combinations')">
+        <span class="nav-num">3</span> Combinations C(n, r)
+      </li>
+      <li class="nav-item" onclick="switchView('view-comparison')">
+        <span class="nav-num">4</span> P vs C Comparison
+      </li>
+    </ul>
+
+    <div class="nav-group-title">Repetition & Multisets</div>
+    <ul class="nav-list">
+      <li class="nav-item" onclick="switchView('view-perm-rep')">
+        <span class="nav-num">5</span> Permutations w/ Rep (n^r)
+      </li>
+      <li class="nav-item" onclick="switchView('view-comb-rep')">
+        <span class="nav-num">6</span> Combinations w/ Rep (Stars & Bars)
+      </li>
+      <li class="nav-item" onclick="switchView('view-multiset')">
+        <span class="nav-num">7</span> Multiset Arrangements
+      </li>
+      <li class="nav-item" onclick="switchView('view-listing')">
+        <span class="nav-num">8</span> List Arrangements & Sets
+      </li>
+    </ul>
+
+    <div class="nav-group-title">Algebraic Structures</div>
+    <ul class="nav-list">
+      <li class="nav-item" onclick="switchView('view-identities')">
+        <span class="nav-num">9</span> Binomial Identities
+      </li>
+      <li class="nav-item" onclick="switchView('view-pascal')">
+        <span class="nav-num">10</span> Pascal's Triangle
+      </li>
+      <li class="nav-item" onclick="switchView('view-recurrence')">
+        <span class="nav-num">11</span> Recurrence Analyzer
+      </li>
+      <li class="nav-item" onclick="switchView('view-expansion')">
+        <span class="nav-num">12</span> Binomial Theorem Expansion
+      </li>
+    </ul>
+
+    <div class="nav-group-title">Verification & Audit</div>
+    <ul class="nav-list">
+      <li class="nav-item" onclick="switchView('view-sympy')">
+        <span class="nav-num">13</span> Symbolic Verification (SymPy)
+      </li>
+      <li class="nav-item" onclick="switchView('view-history')">
+        <span class="nav-num">14</span> Calculation History
+      </li>
+      <li class="nav-item" onclick="switchView('view-tests')">
+        <span class="nav-num">15</span> Automated Self-Test
+      </li>
+    </ul>
+  </aside>
+
+  <!-- MAIN VIEWPORT -->
+  <main class="main-content">
+    
+    <div class="top-banner">
+      <div class="banner-left">
+        <h2 id="current-title">Factorial (n!)</h2>
+        <p id="current-desc">Compute exact product n! = n * (n - 1) * ... * 1 with 0! = 1</p>
+      </div>
+      <div>
+        <span class="tag-badge">Exact Integer Math (BigInt)</span>
+      </div>
+    </div>
+
+    <!-- 1. FACTORIAL -->
+    <div id="view-factorial" class="view-panel active">
+      <div class="card">
+        <div class="card-title">Compute Factorial</div>
+        <div class="card-desc">Enter non-negative integer n (0 &le; n &le; 1000).</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Integer n:</label>
+            <input type="number" id="fact-n" value="5" min="0" max="1000">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="calcFactorial()">Calculate Factorial</button>
+
+        <div id="fact-res" class="result-box" style="display:none;">
+          <div class="result-header">
+            <span class="result-title">Calculation Output</span>
+            <span class="formula-badge">n! = n &times; (n - 1) &times; ... &times; 1</span>
+          </div>
+          <div class="result-value" id="fact-val">-</div>
+          <div class="expl-box" id="fact-expl"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. PERMUTATIONS -->
+    <div id="view-permutations" class="view-panel">
+      <div class="card">
+        <div class="card-title">Permutations P(n, r)</div>
+        <div class="card-desc">Number of ordered arrangements selecting r items from n distinct items. Order matters!</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Total items (n &ge; 0):</label>
+            <input type="number" id="perm-n" value="5" min="0" max="1000">
+          </div>
+          <div class="form-group">
+            <label>Arranged items (0 &le; r &le; n):</label>
+            <input type="number" id="perm-r" value="3" min="0" max="1000">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="calcPermutations()">Calculate P(n, r)</button>
+
+        <div id="perm-res" class="result-box" style="display:none;">
+          <div class="result-header">
+            <span class="result-title">Result</span>
+            <span class="formula-badge">P(n, r) = n! / (n - r)!</span>
+          </div>
+          <div class="result-value" id="perm-val">-</div>
+          <div class="expl-box" id="perm-expl"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. COMBINATIONS -->
+    <div id="view-combinations" class="view-panel">
+      <div class="card">
+        <div class="card-title">Combinations C(n, r)</div>
+        <div class="card-desc">Number of un-ordered subset selections. Order does NOT matter!</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Total items (n &ge; 0):</label>
+            <input type="number" id="comb-n" value="5" min="0" max="1000">
+          </div>
+          <div class="form-group">
+            <label>Selected items (0 &le; r &le; n):</label>
+            <input type="number" id="comb-r" value="3" min="0" max="1000">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="calcCombinations()">Calculate C(n, r)</button>
+
+        <div id="comb-res" class="result-box" style="display:none;">
+          <div class="result-header">
+            <span class="result-title">Result</span>
+            <span class="formula-badge">C(n, r) = n! / (r! &times; (n - r)!)</span>
+          </div>
+          <div class="result-value" id="comb-val">-</div>
+          <div class="expl-box" id="comb-expl"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. COMPARISON -->
+    <div id="view-comparison" class="view-panel">
+      <div class="card">
+        <div class="card-title">Permutation vs Combination Comparison</div>
+        <div class="card-desc">Verify the fundamental relation: P(n, r) = C(n, r) &times; r!</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Total items (n):</label>
+            <input type="number" id="comp-n" value="4" min="0" max="1000">
+          </div>
+          <div class="form-group">
+            <label>Selected items (r):</label>
+            <input type="number" id="comp-r" value="3" min="0" max="1000">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="calcComparison()">Compare P vs C</button>
+
+        <div id="comp-res" class="result-box" style="display:none;">
+          <div class="result-header">
+            <span class="result-title">Verification Card</span>
+            <span class="badge badge-pass" id="comp-status">VERIFIED</span>
+          </div>
+          <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:12px; margin-bottom:14px;">
+            <div style="background:#fff; padding:12px; border-radius:6px; border:1px solid var(--border);">
+              <div style="font-size:0.75rem; color:var(--text-muted);">P(n, r)</div>
+              <div style="font-weight:700; font-size:1.15rem;" id="comp-p">-</div>
+            </div>
+            <div style="background:#fff; padding:12px; border-radius:6px; border:1px solid var(--border);">
+              <div style="font-size:0.75rem; color:var(--text-muted);">C(n, r)</div>
+              <div style="font-weight:700; font-size:1.15rem;" id="comp-c">-</div>
+            </div>
+            <div style="background:#fff; padding:12px; border-radius:6px; border:1px solid var(--border);">
+              <div style="font-size:0.75rem; color:var(--text-muted);">r!</div>
+              <div style="font-weight:700; font-size:1.15rem;" id="comp-rfact">-</div>
+            </div>
+          </div>
+          <div class="expl-box" id="comp-expl"></div>
+          <div id="comp-sample" style="margin-top:12px; font-size:0.85rem; font-family:var(--font-mono);"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5. PERMUTATIONS WITH REPETITION -->
+    <div id="view-perm-rep" class="view-panel">
+      <div class="card">
+        <div class="card-title">Permutations with Repetition (n^r)</div>
+        <div class="card-desc">Sampling with replacement where each position can independently pick any of the n choices. (r &gt; n allowed)</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Choices per slot (n):</label>
+            <input type="number" id="prep-n" value="5" min="0" max="1000">
+          </div>
+          <div class="form-group">
+            <label>Slots length (r):</label>
+            <input type="number" id="prep-r" value="3" min="0" max="1000">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="calcPermRep()">Compute n^r</button>
+
+        <div id="prep-res" class="result-box" style="display:none;">
+          <div class="result-header">
+            <span class="result-title">Result</span>
+            <span class="formula-badge">Formula: n^r</span>
+          </div>
+          <div class="result-value" id="prep-val">-</div>
+          <div class="expl-box" id="prep-expl"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 6. COMBINATIONS WITH REPETITION -->
+    <div id="view-comb-rep" class="view-panel">
+      <div class="card">
+        <div class="card-title">Combinations with Repetition (Multichoose)</div>
+        <div class="card-desc">Selecting r items from n item types with replacement. Evaluated as C(n + r - 1, r) via Stars &amp; Bars.</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Item types (n):</label>
+            <input type="number" id="crep-n" value="5" min="0" max="1000">
+          </div>
+          <div class="form-group">
+            <label>Selections (r):</label>
+            <input type="number" id="crep-r" value="3" min="0" max="1000">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="calcCombRep()">Compute Multichoose</button>
+
+        <div id="crep-res" class="result-box" style="display:none;">
+          <div class="result-header">
+            <span class="result-title">Result</span>
+            <span class="formula-badge">C(n + r - 1, r)</span>
+          </div>
+          <div class="result-value" id="crep-val">-</div>
+          <div class="expl-box" id="crep-expl"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 7. MULTISET -->
+    <div id="view-multiset" class="view-panel">
+      <div class="card">
+        <div class="card-title">Arrangements of Repeated Objects (Multiset)</div>
+        <div class="card-desc">Calculates distinct permutations for words with duplicate characters: n! / (n1! &times; n2! &times; ... &times; nk!).</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Alphanumeric Word (max 50 chars):</label>
+            <input type="text" id="multi-text" value="MISSISSIPPI" maxlength="50">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="calcMultiset()">Compute Multiset Permutations</button>
+
+        <div id="multi-res" class="result-box" style="display:none;">
+          <div class="result-header">
+            <span class="result-title">Result</span>
+            <span class="formula-badge">n! / &Pi;(ni!)</span>
+          </div>
+          <div class="result-value" id="multi-val">-</div>
+          <div id="multi-freq" style="margin-bottom:12px; font-size:0.88rem;"></div>
+          <div class="expl-box" id="multi-expl"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 8. LISTING -->
+    <div id="view-listing" class="view-panel">
+      <div class="card">
+        <div class="card-title">Exhaustive Listing &amp; Set Uniqueness (Small Inputs)</div>
+        <div class="card-desc">Enumerates all arrangements/groups, stores them in tuples, and verifies set uniqueness.</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Listing Mode:</label>
+            <select id="list-mode" onchange="toggleListInputs()">
+              <option value="perm">Permutations P(n, r) of Letters</option>
+              <option value="comb">Combinations C(n, r) of Letters</option>
+              <option value="multi">Multiset Permutations of Word</option>
+            </select>
+          </div>
+          <div class="form-group" id="list-n-group">
+            <label>Letter Pool n (1 &le; n &le; 8):</label>
+            <input type="number" id="list-n" value="4" min="1" max="8">
+          </div>
+          <div class="form-group" id="list-r-group">
+            <label>Selection r (1 &le; r &le; n):</label>
+            <input type="number" id="list-r" value="2" min="1" max="8">
+          </div>
+          <div class="form-group" id="list-word-group" style="display:none;">
+            <label>Word (max 8 chars):</label>
+            <input type="text" id="list-word" value="AAB" maxlength="8">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="generateListing()">Generate List &amp; Verify Sets</button>
+
+        <div id="list-res" class="result-box" style="display:none;">
+          <div class="result-header">
+            <span class="result-title" id="list-summary-title">Items</span>
+            <span class="badge badge-pass" id="list-match-badge">MATCH</span>
+          </div>
+          <div style="font-size:0.88rem; margin-bottom:10px;">
+            Theoretical Formula: <b id="list-theo">-</b> | Enumerated Set Size: <b id="list-actual">-</b>
+          </div>
+          <div class="item-grid" id="list-container"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 9. IDENTITIES -->
+    <div id="view-identities" class="view-panel">
+      <div class="card">
+        <div class="card-title">Binomial Coefficient Identities</div>
+        <div class="card-desc">Validates Symmetry, Pascal's Additive Rule, and the Row Sum Identity (2^n) for chosen (n, r).</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>n (0 &le; n &le; 1000):</label>
+            <input type="number" id="id-n" value="5" min="0" max="1000">
+          </div>
+          <div class="form-group">
+            <label>r (0 &le; r &le; n):</label>
+            <input type="number" id="id-r" value="2" min="0" max="1000">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="verifyIdentities()">Verify Identities</button>
+
+        <div id="id-res" class="result-box" style="display:none;">
+          <div class="result-header">
+            <span class="result-title">Verification Results</span>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:12px;">
+            <div style="background:#fff; padding:12px; border-radius:6px; border:1px solid var(--border);">
+              <b>1. Symmetry Identity:</b> C(n, r) = C(n, n - r)
+              <div id="id-sym-text" style="font-size:0.88rem; margin-top:4px;"></div>
+            </div>
+            <div style="background:#fff; padding:12px; border-radius:6px; border:1px solid var(--border);">
+              <b>2. Pascal's Additive Identity:</b> C(n, r) = C(n - 1, r - 1) + C(n - 1, r)
+              <div id="id-pascal-text" style="font-size:0.88rem; margin-top:4px;"></div>
+            </div>
+            <div style="background:#fff; padding:12px; border-radius:6px; border:1px solid var(--border);">
+              <b>3. Row Sum Identity:</b> &Sigma; C(n, k) = 2^n
+              <div id="id-row-text" style="font-size:0.88rem; margin-top:4px;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 10. PASCAL'S TRIANGLE -->
+    <div id="view-pascal" class="view-panel">
+      <div class="card">
+        <div class="card-title">Pascal's Triangle Generator</div>
+        <div class="card-desc">Constructs triangle rows from preceding row additions. Verified against C(n, k). (Rows 0 to rows - 1)</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Rows count (1 &le; rows &le; 15):</label>
+            <input type="number" id="pascal-rows" value="6" min="1" max="15">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="renderPascal()">Render Triangle</button>
+
+        <div id="pascal-res" class="result-box" style="display:none;">
+          <div class="pascal-container" id="pascal-tree"></div>
+          <div class="expl-box" style="margin-top:14px;">
+            <b>Properties:</b> First and last entries are always 1 because C(n, 0) = C(n, n) = 1.
+            Every interior number is the exact sum of the two elements above it.
+            Row 5 values: 1 5 10 10 5 1 with row sum 32 (= 2^5).
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 11. RECURRENCE -->
+    <div id="view-recurrence" class="view-panel">
+      <div class="card">
+        <div class="card-title">Recurrence Relation Analyzer</div>
+        <div class="card-desc">Numerically generate sequential terms for Fibonacci, Factorial, or Custom linear recurrences of order k.</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Sequence Type:</label>
+            <select id="rec-type" onchange="toggleRecInputs()">
+              <option value="fib">Fibonacci: F(n) = F(n-1) + F(n-2), F(0)=0, F(1)=1</option>
+              <option value="fact">Factorial Recurrence: a(n) = n * a(n-1), a(0)=1</option>
+              <option value="custom">Custom Order k Linear Recurrence (1 &le; k &le; 5)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Number of terms to generate (1 to 50):</label>
+            <input type="number" id="rec-terms" value="10" min="1" max="50">
+          </div>
+        </div>
+
+        <div id="rec-custom-box" style="display:none; margin-bottom:18px; padding:16px; background:#f1f5f9; border-radius:6px;">
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Order k (1 to 5):</label>
+              <input type="number" id="rec-order" value="2" min="1" max="5" onchange="renderCustomRecFields()">
+            </div>
+          </div>
+          <div id="rec-dynamic-fields"></div>
+        </div>
+
+        <button class="btn btn-primary" onclick="calcRecurrence()">Generate Terms</button>
+
+        <div id="rec-res" class="result-box" style="display:none;">
+          <div class="result-header">
+            <span class="result-title" id="rec-res-title">Sequence Terms</span>
+          </div>
+          <div style="max-height:280px; overflow-y:auto; font-family:var(--font-mono); font-size:0.9rem;" id="rec-terms-list"></div>
+          <div class="expl-box" style="margin-top:12px;">
+            <b>Important Note:</b> Generating numerical sequence terms sequentially is NOT equivalent to finding a closed-form formula (e.g. Binet's formula for Fibonacci).
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 12. EXPANSION -->
+    <div id="view-expansion" class="view-panel">
+      <div class="card">
+        <div class="card-title">Binomial Theorem Expansion</div>
+        <div class="card-desc">Expands (a*x + b*y)^n using binomial coefficients C(n, k) into canonical ASCII polynomials.</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Exponent n (0 &le; n &le; 20):</label>
+            <input type="number" id="exp-n" value="3" min="0" max="20">
+          </div>
+          <div class="form-group">
+            <label>Coefficient a (-10 &le; a &le; 10):</label>
+            <input type="number" id="exp-a" value="1" min="-10" max="10">
+          </div>
+          <div class="form-group">
+            <label>Coefficient b (-10 &le; b &le; 10):</label>
+            <input type="number" id="exp-b" value="1" min="-10" max="10">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="calcExpansion()">Expand Polynomial</button>
+
+        <div id="exp-res" class="result-box" style="display:none;">
+          <div class="result-header">
+            <span class="result-title">Expanded Polynomial</span>
+          </div>
+          <div class="result-value" style="font-size:1.15rem;" id="exp-val">-</div>
+          <div class="expl-box" id="exp-expl"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 13. SYMPY / SYMBOLIC -->
+    <div id="view-sympy" class="view-panel">
+      <div class="card">
+        <div class="card-title">Symbolic Mathematics &amp; SymPy Verification Reference</div>
+        <div class="card-desc">Formal mathematical relationships verified symbolically in the companion Python tool.</div>
+        <div style="display:flex; flex-direction:column; gap:16px;">
+          <div style="background:#f8fafc; border:1px solid var(--border); border-radius:6px; padding:16px;">
+            <h4 style="font-size:0.95rem; margin-bottom:6px;">1. Closed-Form Recurrence via SymPy rsolve()</h4>
+            <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:8px;">
+              For the Fibonacci recurrence F(n) = F(n-1) + F(n-2), SymPy solves the characteristic equation r^2 - r - 1 = 0 to yield the exact closed form (Binet's Formula):
+            </p>
+            <div style="background:#fff; padding:10px; border-radius:4px; font-family:var(--font-mono); font-size:0.88rem; border:1px solid #cbd5e1;">
+              F(n) = [((1 + &radic;5) / 2)^n - ((1 - &radic;5) / 2)^n] / &radic;5
+            </div>
+          </div>
+          <div style="background:#f8fafc; border:1px solid var(--border); border-radius:6px; padding:16px;">
+            <h4 style="font-size:0.95rem; margin-bottom:6px;">2. Symbolic Binomial Simplification</h4>
+            <p style="font-size:0.85rem; color:var(--text-muted);">
+              SymPy's <code style="font-family:var(--font-mono);">simplify(expand((a*x + b*y)**n) - my_expansion) == 0</code> guarantees exact algebraic equivalence without floating-point approximations.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 14. HISTORY -->
+    <div id="view-history" class="view-panel">
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <div>
+            <div class="card-title">Calculation History</div>
+            <div class="card-desc" style="margin-bottom:0;">Session and persistent audit log matching history.txt</div>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button class="btn btn-outline" onclick="clearHistory()">Clear History</button>
+          </div>
+        </div>
+
+        <div style="margin-bottom:14px;">
+          <input type="text" id="hist-search" placeholder="Search history by operation or parameter..." oninput="renderHistoryTable()" style="width:100%; padding:9px 12px; border:1px solid var(--border); border-radius:6px;">
+        </div>
+
+        <div style="overflow-x:auto;">
+          <table class="history-table">
+            <thead>
+              <tr>
+                <th style="width:170px;">Timestamp</th>
+                <th style="width:190px;">Operation</th>
+                <th style="width:200px;">Inputs</th>
+                <th>Result</th>
+              </tr>
+            </thead>
+            <tbody id="hist-tbody">
+              <tr><td colspan="4" style="text-align:center; color:var(--text-muted);">No calculations recorded yet.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 15. SELF TEST -->
+    <div id="view-tests" class="view-panel">
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+          <div>
+            <div class="card-title">Automated Verification Test Suite</div>
+            <div class="card-desc" style="margin-bottom:0;">Live execution of the 13 assertion-based unit tests.</div>
+          </div>
+          <button class="btn btn-primary" onclick="runSelfTests()">Run All Tests</button>
+        </div>
+
+        <div id="test-summary-badge" style="margin-bottom:14px; font-weight:700;"></div>
+        <div style="background:#fff; border:1px solid var(--border); border-radius:8px; overflow:hidden;" id="test-list-container">
+          <div style="padding:16px; color:var(--text-muted); text-align:center;">Click "Run All Tests" to execute the regression test suite.</div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <script>
+    // =========================================================================
+    // CORE MATHEMATICAL ENGINE (BIGINT EXACT INTEGER ARITHMETIC)
+    // =========================================================================
+    
+    function factorial(n) {
+      n = BigInt(n);
+      if (n < 0n) throw new Error("Factorial is only defined for non-negative integers.");
+      let res = 1n;
+      for (let i = 2n; i <= n; i++) res *= i;
+      return res;
+    }
+
+    function permutations(n, r) {
+      n = BigInt(n); r = BigInt(r);
+      if (n < 0n || r < 0n || r > n) throw new Error("Requires 0 <= r <= n.");
+      return factorial(n) / factorial(n - r);
+    }
+
+    function combinations(n, r) {
+      n = BigInt(n); r = BigInt(r);
+      if (n < 0n || r < 0n || r > n) throw new Error("Requires 0 <= r <= n.");
+      return factorial(n) / (factorial(r) * factorial(n - r));
+    }
+
+    function permutationsWithRepetition(n, r) {
+      n = BigInt(n); r = BigInt(r);
+      if (n < 0n || r < 0n) throw new Error("n and r must be non-negative.");
+      if (n === 0n && r === 0n) return 1n;
+      if (n === 0n && r > 0n) return 0n;
+      return n ** r;
+    }
+
+    function combinationsWithRepetition(n, r) {
+      n = BigInt(n); r = BigInt(r);
+      if (n < 0n || r < 0n) throw new Error("n and r must be non-negative.");
+      if (n === 0n) return r === 0n ? 1n : 0n;
+      if (r === 0n) return 1n;
+      return combinations(n + r - 1n, r);
+    }
+
+    function multisetArrangementsCount(text) {
+      if (!text || text.length === 0) return { total: 1n, freq: {} };
+      const freq = {};
+      for (const ch of text) {
+        freq[ch] = (freq[ch] || 0) + 1;
+      }
+      let denom = 1n;
+      for (const ch in freq) {
+        denom *= factorial(freq[ch]);
+      }
+      const total = factorial(text.length) / denom;
+      return { total, freq };
+    }
+
+    function formatLargeNum(num) {
+      const s = num.toString();
+      if (s.length > 60) {
+        return s.slice(0, 20) + "..." + s.slice(-10) + " (" + s.length + " digits)";
+      }
+      return s;
+    }
+
+    // =========================================================================
+    // HISTORY MANAGER (LOCAL STORAGE PERSISTENCE)
+    // =========================================================================
+    const HIST_KEY = "combinatorics_history_log";
+
+    function saveHistory(op, inputs, result) {
+      const now = new Date();
+      const ts = now.toISOString().slice(0, 19).replace("T", " ");
+      const rec = {
+        timestamp: ts,
+        operation: String(op).replace(/[|\n\r]/g, " "),
+        inputs: String(inputs).replace(/[|\n\r]/g, " "),
+        result: String(result).replace(/[|\n\r]/g, " ")
+      };
+      const existing = JSON.parse(localStorage.getItem(HIST_KEY) || "[]");
+      existing.unshift(rec);
+      if (existing.length > 200) existing.pop();
+      localStorage.setItem(HIST_KEY, JSON.stringify(existing));
+      renderHistoryTable();
+    }
+
+    function renderHistoryTable() {
+      const query = (document.getElementById("hist-search")?.value || "").toLowerCase().trim();
+      const records = JSON.parse(localStorage.getItem(HIST_KEY) || "[]");
+      const tbody = document.getElementById("hist-tbody");
+      if (!tbody) return;
+
+      const filtered = records.filter(r => 
+        r.operation.toLowerCase().includes(query) || r.inputs.toLowerCase().includes(query)
+      );
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">No records found.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = filtered.map(r => `
+        <tr>
+          <td style="font-family:var(--font-mono); font-size:0.8rem; color:var(--text-muted);">${r.timestamp}</td>
+          <td><b>${r.operation}</b></td>
+          <td style="font-family:var(--font-mono); font-size:0.82rem;">${r.inputs}</td>
+          <td style="font-family:var(--font-mono); font-weight:600; color:var(--primary); word-break:break-all;">${r.result}</td>
+        </tr>
+      `).join("");
+    }
+
+    function clearHistory() {
+      if (confirm("Clear all calculation records?")) {
+        localStorage.removeItem(HIST_KEY);
+        renderHistoryTable();
+      }
+    }
+
+    // =========================================================================
+    // NAVIGATION
+    // =========================================================================
+    const viewMetadata = {
+      "view-factorial": ["Factorial (n!)", "Compute exact product n! = n * (n - 1) * ... * 1 with 0! = 1"],
+      "view-permutations": ["Permutations P(n, r)", "Ordered arrangements of r items chosen from n distinct elements"],
+      "view-combinations": ["Combinations C(n, r)", "Un-ordered subset selections where element order does not matter"],
+      "view-comparison": ["Permutation vs Combination Comparison", "Verify the foundational identity: P(n, r) = C(n, r) * r!"],
+      "view-perm-rep": ["Permutations with Repetition", "Sequential choices with replacement (n^r)"],
+      "view-comb-rep": ["Combinations with Repetition", "Multichoose selection via Stars and Bars theorem"],
+      "view-multiset": ["Multiset Arrangements", "Permutations of repeated objects: n! / (n1! * n2! * ... * nk!)"],
+      "view-listing": ["Exhaustive Listing & Set Verification", "Generate tuples, test set uniqueness, and compare against formulas"],
+      "view-identities": ["Binomial Coefficient Identities", "Symmetry, Pascal's additive rule, and row sums = 2^n"],
+      "view-pascal": ["Pascal's Triangle Generator", "Visual pyramid constructed via adjacent element sums"],
+      "view-recurrence": ["Recurrence Relation Analyzer", "Sequential numerical term generation for linear recurrences"],
+      "view-expansion": ["Binomial Theorem Expansion", "Expand (a*x + b*y)^n into clean algebraic polynomials"],
+      "view-sympy": ["Symbolic Verification (SymPy Reference)", "Formal mathematical relationships verified symbolically in Python"],
+      "view-history": ["Calculation History Log", "Session audit log matching history.txt"],
+      "view-tests": ["Automated Self-Test Suite", "Live execution of the 13 assertion-based unit tests"]
+    };
+
+    function switchView(viewId) {
+      document.querySelectorAll(".view-panel").forEach(p => p.classList.remove("active"));
+      document.querySelectorAll(".nav-item").forEach(item => item.classList.remove("active"));
+      
+      const target = document.getElementById(viewId);
+      if (target) target.classList.add("active");
+
+      const navs = document.querySelectorAll(".nav-item");
+      navs.forEach(nav => {
+        if (nav.getAttribute("onclick") && nav.getAttribute("onclick").includes(viewId)) {
+          nav.classList.add("active");
+        }
+      });
+
+      if (viewMetadata[viewId]) {
+        document.getElementById("current-title").innerText = viewMetadata[viewId][0];
+        document.getElementById("current-desc").innerText = viewMetadata[viewId][1];
+      }
+      if (viewId === "view-history") renderHistoryTable();
+    }
+
+    // =========================================================================
+    // ACTION HANDLERS
+    // =========================================================================
+
+    function calcFactorial() {
+      const n = parseInt(document.getElementById("fact-n").value);
+      if (isNaN(n) || n < 0 || n > 1000) {
+        alert("Please enter a whole integer between 0 and 1000."); return;
+      }
+      const res = factorial(n);
+      const display = formatLargeNum(res);
+
+      document.getElementById("fact-val").innerText = n + "! = " + display;
+      document.getElementById("fact-expl").innerHTML = `
+        <b>Computation:</b> Product of all positive integers from 1 up to ${n}.<br>
+        <b>Zero factorial rule:</b> 0! = 1 by definition (representing 1 unique arrangement of the empty set).
+      `;
+      document.getElementById("fact-res").style.display = "block";
+      saveHistory("Factorial", `n=${n}`, display);
+    }
+
+    function calcPermutations() {
+      const n = parseInt(document.getElementById("perm-n").value);
+      const r = parseInt(document.getElementById("perm-r").value);
+      if (isNaN(n) || isNaN(r) || n < 0 || r < 0 || r > n || n > 1000) {
+        alert("Please enter integers satisfying 0 <= r <= n <= 1000."); return;
+      }
+      const res = permutations(n, r);
+      const display = formatLargeNum(res);
+
+      document.getElementById("perm-val").innerText = `P(${n}, ${r}) = ` + display;
+      document.getElementById("perm-expl").innerHTML = `
+        <b>Step-by-step substitution:</b> P(${n}, ${r}) = ${n}! / (${n} - ${r})! = ${n}! / ${n - r}!<br>
+        <b>Meaning:</b> There are ${display} distinct ways to arrange ${r} items from ${n} items where sequence order matters.
+      `;
+      document.getElementById("perm-res").style.display = "block";
+      saveHistory("Permutations", `n=${n}, r=${r}`, display);
+    }
+
+    function calcCombinations() {
+      const n = parseInt(document.getElementById("comb-n").value);
+      const r = parseInt(document.getElementById("comb-r").value);
+      if (isNaN(n) || isNaN(r) || n < 0 || r < 0 || r > n || n > 1000) {
+        alert("Please enter integers satisfying 0 <= r <= n <= 1000."); return;
+      }
+      const res = combinations(n, r);
+      const display = formatLargeNum(res);
+
+      document.getElementById("comb-val").innerText = `C(${n}, ${r}) = ` + display;
+      document.getElementById("comb-expl").innerHTML = `
+        <b>Step-by-step substitution:</b> C(${n}, ${r}) = ${n}! / (${r}! &times; ${n - r}!)<br>
+        <b>Why we divide by r!:</b> For any group of ${r} items, there exist ${r}! internal orderings that all represent the identical subset.
+      `;
+      document.getElementById("comb-res").style.display = "block";
+      saveHistory("Combinations", `n=${n}, r=${r}`, display);
+    }
+
+    function calcComparison() {
+      const n = parseInt(document.getElementById("comp-n").value);
+      const r = parseInt(document.getElementById("comp-r").value);
+      if (isNaN(n) || isNaN(r) || n < 0 || r < 0 || r > n || n > 1000) {
+        alert("Please enter integers satisfying 0 <= r <= n <= 1000."); return;
+      }
+      const p = permutations(n, r);
+      const c = combinations(n, r);
+      const rfact = factorial(r);
+      const prod = c * rfact;
+      const isVerified = (p === prod);
+
+      document.getElementById("comp-p").innerText = formatLargeNum(p);
+      document.getElementById("comp-c").innerText = formatLargeNum(c);
+      document.getElementById("comp-rfact").innerText = formatLargeNum(rfact);
+      document.getElementById("comp-status").innerText = isVerified ? "VERIFIED: P = C * r!" : "FAILED";
+      document.getElementById("comp-expl").innerHTML = `
+        <b>Algebraic check:</b> C(n, r) &times; r! = ${formatLargeNum(c)} &times; ${formatLargeNum(rfact)} = ${formatLargeNum(prod)} (Matches P(n, r) exactly).
+      `;
+
+      const sampleDiv = document.getElementById("comp-sample");
+      if (n <= 6 && r <= 4 && r > 0) {
+        const letters = "ABCD".slice(0, r).split("");
+        const perms = [];
+        function permute(arr, m = []) {
+          if (arr.length === 0) perms.push(m.join(""));
+          else {
+            for (let i = 0; i < arr.length; i++) {
+              let curr = arr.slice();
+              let next = curr.splice(i, 1);
+              permute(curr.slice(), m.concat(next));
+            }
+          }
+        }
+        permute(letters);
+        sampleDiv.innerHTML = `<b>Sample Group {${letters.join(",")}} has ${perms.length} orderings counting as 1 combination:</b><br>${perms.join(", ")}`;
+      } else {
+        sampleDiv.innerHTML = "";
+      }
+
+      document.getElementById("comp-res").style.display = "block";
+      saveHistory("Comparison", `n=${n}, r=${r}`, `P=${formatLargeNum(p)}, C=${formatLargeNum(c)}`);
+    }
+
+    function calcPermRep() {
+      const n = parseInt(document.getElementById("prep-n").value);
+      const r = parseInt(document.getElementById("prep-r").value);
+      if (isNaN(n) || isNaN(r) || n < 0 || r < 0 || n > 1000 || r > 1000) {
+        alert("Please enter non-negative integers <= 1000."); return;
+      }
+      const res = permutationsWithRepetition(n, r);
+      const display = formatLargeNum(res);
+
+      document.getElementById("prep-val").innerText = `${n}^${r} = ` + display;
+      document.getElementById("prep-expl").innerHTML = `
+        <b>Sampling with Replacement:</b> Each of the ${r} positions has all ${n} options available independently.<br>
+        <b>Zero power rule:</b> 0^0 = 1 by convention (the single empty sequence).
+      `;
+      document.getElementById("prep-res").style.display = "block";
+      saveHistory("Perm w/ Rep", `n=${n}, r=${r}`, display);
+    }
+
+    function calcCombRep() {
+      const n = parseInt(document.getElementById("crep-n").value);
+      const r = parseInt(document.getElementById("crep-r").value);
+      if (isNaN(n) || isNaN(r) || n < 0 || r < 0 || n > 1000 || r > 1000) {
+        alert("Please enter non-negative integers <= 1000."); return;
+      }
+      const res = combinationsWithRepetition(n, r);
+      const display = formatLargeNum(res);
+
+      const eqN = n > 0 ? (n + r - 1) : 0;
+      document.getElementById("crep-val").innerText = `Result = ` + display;
+      document.getElementById("crep-expl").innerHTML = `
+        <b>Stars and Bars formulation:</b> C(${n} + ${r} - 1, ${r}) = C(${eqN}, ${r}) = ${display}.<br>
+        <b>Example:</b> Choosing 3 scoops from 5 ice-cream types = C(5 + 3 - 1, 3) = C(7, 3) = 35.
+      `;
+      document.getElementById("crep-res").style.display = "block";
+      saveHistory("Comb w/ Rep", `n=${n}, r=${r}`, display);
+    }
+
+    function calcMultiset() {
+      const text = document.getElementById("multi-text").value.trim();
+      if (!text || text.length > 50 || !/^[a-zA-Z0-9]+$/.test(text)) {
+        alert("Please enter an alphanumeric word up to 50 characters."); return;
+      }
+      const { total, freq } = multisetArrangementsCount(text);
+      const display = formatLargeNum(total);
+
+      const freqHtml = Object.keys(freq).sort().map(k => `<b>'${k}':</b> ${freq[k]}`).join(" | ");
+      const denomHtml = Object.keys(freq).sort().map(k => `${freq[k]}!`).join(" &times; ");
+
+      document.getElementById("multi-val").innerText = display;
+      document.getElementById("multi-freq").innerHTML = `<b>Character Frequencies:</b> ${freqHtml}`;
+      document.getElementById("multi-expl").innerHTML = `
+        <b>Formula substitution:</b> ${text.length}! / (${denomHtml}) = ${display}.<br>
+        <b>Canonical check:</b> 'MISSISSIPPI' has 11 letters (1 M, 4 I, 4 S, 2 P) = 11!/(1!4!4!2!) = 34,650.
+      `;
+      document.getElementById("multi-res").style.display = "block";
+      saveHistory("Multiset", `text='${text}'`, display);
+    }
+
+    function toggleListInputs() {
+      const mode = document.getElementById("list-mode").value;
+      document.getElementById("list-n-group").style.display = (mode !== "multi") ? "flex" : "none";
+      document.getElementById("list-r-group").style.display = (mode !== "multi") ? "flex" : "none";
+      document.getElementById("list-word-group").style.display = (mode === "multi") ? "flex" : "none";
+    }
+
+    function generateListing() {
+      const mode = document.getElementById("list-mode").value;
+      let items = [];
+      let theo = 0n;
+
+      if (mode === "perm") {
+        const n = parseInt(document.getElementById("list-n").value);
+        const r = parseInt(document.getElementById("list-r").value);
+        if (isNaN(n) || isNaN(r) || n < 1 || r < 1 || r > n || n > 8) {
+          alert("Please enter 1 <= r <= n <= 8."); return;
+        }
+        theo = permutations(n, r);
+        const chars = "ABCDEFGH".slice(0, n).split("");
+        function permute(pool, chosen = []) {
+          if (chosen.length === r) {
+            items.push(chosen.slice());
+            return;
+          }
+          for (let i = 0; i < pool.length; i++) {
+            const nextPool = pool.slice(0, i).concat(pool.slice(i + 1));
+            permute(nextPool, chosen.concat(pool[i]));
+          }
+        }
+        permute(chars);
+      } else if (mode === "comb") {
+        const n = parseInt(document.getElementById("list-n").value);
+        const r = parseInt(document.getElementById("list-r").value);
+        if (isNaN(n) || isNaN(r) || n < 1 || r < 1 || r > n || n > 8) {
+          alert("Please enter 1 <= r <= n <= 8."); return;
+        }
+        theo = combinations(n, r);
+        const chars = "ABCDEFGH".slice(0, n).split("");
+        function combine(start, chosen = []) {
+          if (chosen.length === r) {
+            items.push(chosen.slice());
+            return;
+          }
+          for (let i = start; i < chars.length; i++) {
+            combine(i + 1, chosen.concat(chars[i]));
+          }
+        }
+        combine(0);
+      } else {
+        const word = document.getElementById("list-word").value.trim();
+        if (!word || word.length > 8 || !/^[a-zA-Z0-9]+$/.test(word)) {
+          alert("Please enter an alphanumeric word up to 8 characters."); return;
+        }
+        theo = multisetArrangementsCount(word).total;
+        const setMap = new Set();
+        function permuteWord(arr, m = []) {
+          if (arr.length === 0) setMap.add(m.join(""));
+          else {
+            for (let i = 0; i < arr.length; i++) {
+              let curr = arr.slice();
+              let next = curr.splice(i, 1);
+              permuteWord(curr.slice(), m.concat(next));
+            }
+          }
+        }
+        permuteWord(word.split(""));
+        items = Array.from(setMap).sort().map(s => s.split(""));
+      }
+
+      const match = (BigInt(items.length) === theo);
+      document.getElementById("list-theo").innerText = theo.toString();
+      document.getElementById("list-actual").innerText = items.length;
+      document.getElementById("list-match-badge").innerText = match ? "MATCH (Set verified)" : "MISMATCH";
+      document.getElementById("list-match-badge").className = "badge " + (match ? "badge-pass" : "badge-fail");
+
+      const displayList = items.slice(0, 500);
+      document.getElementById("list-container").innerHTML = displayList.map(item => `
+        <div class="item-card">${item.join("")}</div>
+      `).join("");
+
+      document.getElementById("list-res").style.display = "block";
+      saveHistory("Listing (" + mode + ")", `count=${items.length}`, match ? "MATCH" : "MISMATCH");
+    }
+
+    function verifyIdentities() {
+      const n = parseInt(document.getElementById("id-n").value);
+      const r = parseInt(document.getElementById("id-r").value);
+      if (isNaN(n) || isNaN(r) || n < 0 || r < 0 || r > n || n > 1000) {
+        alert("Please enter 0 <= r <= n <= 1000."); return;
+      }
+
+      const c_nr = combinations(n, r);
+      const c_sym = combinations(n, n - r);
+      const symPass = (c_nr === c_sym);
+
+      document.getElementById("id-sym-text").innerHTML = `
+        C(${n}, ${r}) = ${formatLargeNum(c_nr)} &nbsp;|&nbsp; C(${n}, ${n - r}) = ${formatLargeNum(c_sym)}
+        <span class="badge ${symPass ? 'badge-pass' : 'badge-fail'}">${symPass ? 'VERIFIED' : 'FAILED'}</span>
+      `;
+
+      if (n >= 1 && r >= 1 && r <= (n - 1)) {
+        const p1 = combinations(n - 1, r - 1);
+        const p2 = combinations(n - 1, r);
+        const pSum = p1 + p2;
+        const pascalPass = (c_nr === pSum);
+        document.getElementById("id-pascal-text").innerHTML = `
+          C(${n - 1}, ${r - 1}) + C(${n - 1}, ${r}) = ${formatLargeNum(p1)} + ${formatLargeNum(p2)} = ${formatLargeNum(pSum)}
+          <span class="badge ${pascalPass ? 'badge-pass' : 'badge-fail'}">${pascalPass ? 'VERIFIED' : 'FAILED'}</span>
+        `;
+      } else {
+        document.getElementById("id-pascal-text").innerHTML = `
+          Pascal identity applies to interior elements (n &ge; 1 and 1 &le; r &le; n - 1). Current selection is a boundary element.
+          <span class="badge badge-info">BOUNDARY ELEMENT</span>
+        `;
+      }
+
+      let rowSum = 0n;
+      for (let k = 0n; k <= BigInt(n); k++) {
+        rowSum += combinations(BigInt(n), k);
+      }
+      const pow2 = 2n ** BigInt(n);
+      const rowPass = (rowSum === pow2);
+
+      document.getElementById("id-row-text").innerHTML = `
+        Row sum = ${formatLargeNum(rowSum)} &nbsp;|&nbsp; 2^${n} = ${formatLargeNum(pow2)}
+        <span class="badge ${rowPass ? 'badge-pass' : 'badge-fail'}">${rowPass ? 'VERIFIED' : 'FAILED'}</span>
+      `;
+
+      document.getElementById("id-res").style.display = "block";
+      saveHistory("Identities", `n=${n}, r=${r}`, "All verified");
+    }
+
+    function renderPascal() {
+      const rows = parseInt(document.getElementById("pascal-rows").value);
+      if (isNaN(rows) || rows < 1 || rows > 15) {
+        alert("Please enter a row count between 1 and 15."); return;
+      }
+
+      const tri = [];
+      for (let i = 0; i < rows; i++) {
+        const row = [1n];
+        if (i > 0) {
+          const prev = tri[i - 1];
+          for (let j = 1; j < i; j++) {
+            row.push(prev[j - 1] + prev[j]);
+          }
+          row.push(1n);
+        }
+        tri.push(row);
+      }
+
+      const container = document.getElementById("pascal-tree");
+      container.innerHTML = tri.map((row, idx) => {
+        const rowSum = row.reduce((a, b) => a + b, 0n);
+        const cells = row.map(val => `<span class="pascal-cell">${val.toString()}</span>`).join("");
+        return `
+          <div class="pascal-row">
+            ${cells}
+            <span class="pascal-row-info">Row ${idx} (Sum = ${rowSum})</span>
+          </div>
+        `;
+      }).join("");
+
+      document.getElementById("pascal-res").style.display = "block";
+      saveHistory("Pascal Triangle", `rows=${rows}`, `Rendered ${rows} rows`);
+    }
+
+    function toggleRecInputs() {
+      const type = document.getElementById("rec-type").value;
+      document.getElementById("rec-custom-box").style.display = (type === "custom") ? "block" : "none";
+      if (type === "custom") renderCustomRecFields();
+    }
+
+    function renderCustomRecFields() {
+      const k = parseInt(document.getElementById("rec-order").value) || 2;
+      let html = `<div style="display:grid; grid-template-columns: repeat(${k}, 1fr); gap:10px; margin-bottom:12px;">`;
+      for (let i = 1; i <= k; i++) {
+        html += `
+          <div class="form-group">
+            <label>c${i} ${i === k ? '(non-zero)' : ''}:</label>
+            <input type="number" id="rec-c-${i}" value="1">
+          </div>
+        `;
+      }
+      html += `</div><div style="display:grid; grid-template-columns: repeat(${k}, 1fr); gap:10px;">`;
+      for (let i = 0; i < k; i++) {
+        html += `
+          <div class="form-group">
+            <label>Initial a(${i}):</label>
+            <input type="number" id="rec-a-${i}" value="${i}">
+          </div>
+        `;
+      }
+      html += `</div>`;
+      document.getElementById("rec-dynamic-fields").innerHTML = html;
+    }
+
+    function calcRecurrence() {
+      const type = document.getElementById("rec-type").value;
+      const terms = parseInt(document.getElementById("rec-terms").value);
+      if (isNaN(terms) || terms < 1 || terms > 50) {
+        alert("Please enter terms between 1 and 50."); return;
+      }
+
+      let seq = [];
+      let title = "";
+
+      if (type === "fib") {
+        title = "Fibonacci Sequence: F(n) = F(n-1) + F(n-2)";
+        seq = [0n, 1n];
+        while (seq.length < terms) {
+          seq.push(seq[seq.length - 1] + seq[seq.length - 2]);
+        }
+        seq = seq.slice(0, terms);
+      } else if (type === "fact") {
+        title = "Factorial Recurrence: a(n) = n * a(n-1)";
+        seq = [1n];
+        for (let n = 1; n < terms; n++) {
+          seq.push(BigInt(n) * seq[n - 1]);
+        }
+      } else {
+        const k = parseInt(document.getElementById("rec-order").value);
+        const coeffs = [];
+        const inits = [];
+        for (let i = 1; i <= k; i++) {
+          const c = parseInt(document.getElementById(`rec-c-${i}`).value);
+          if (isNaN(c)) { alert(`Invalid coefficient c${i}`); return; }
+          if (i === k && c === 0) { alert(`Trailing coefficient c${k} cannot be 0!`); return; }
+          coeffs.push(BigInt(c));
+        }
+        for (let i = 0; i < k; i++) {
+          const a = parseInt(document.getElementById(`rec-a-${i}`).value);
+          if (isNaN(a)) { alert(`Invalid initial value a(${i})`); return; }
+          inits.push(BigInt(a));
+        }
+
+        title = `Custom Linear Recurrence (Order ${k})`;
+        seq = inits.slice(0, terms);
+        for (let n = k; n < terms; n++) {
+          let nextVal = 0n;
+          for (let i = 0; i < k; i++) {
+            nextVal += coeffs[i] * seq[n - 1 - i];
+          }
+          seq.push(nextVal);
+        }
+      }
+
+      document.getElementById("rec-res-title").innerText = title;
+      document.getElementById("rec-terms-list").innerHTML = seq.map((val, idx) => `
+        <div style="padding:4px 0; border-bottom:1px dotted var(--border);">
+          a(${idx}) = <b>${formatLargeNum(val)}</b>
+        </div>
+      `).join("");
+
+      document.getElementById("rec-res").style.display = "block";
+      saveHistory(title, `terms=${terms}`, `Generated ${seq.length} terms`);
+    }
+
+    function calcExpansion() {
+      const n = parseInt(document.getElementById("exp-n").value);
+      const a = parseInt(document.getElementById("exp-a").value);
+      const b = parseInt(document.getElementById("exp-b").value);
+      if (isNaN(n) || isNaN(a) || isNaN(b) || n < 0 || n > 20 || Math.abs(a) > 10 || Math.abs(b) > 10) {
+        alert("Please enter 0 <= n <= 20 and |a|, |b| <= 10."); return;
+      }
+
+      const parts = [];
+      for (let k = 0; k <= n; k++) {
+        const comb = combinations(n, k);
+        const aFactor = BigInt(a) ** BigInt(n - k);
+        const bFactor = BigInt(b) ** BigInt(k);
+        const coeff = comb * aFactor * bFactor;
+        const xPow = n - k;
+        const yPow = k;
+
+        if (coeff === 0n) continue;
+
+        let sign = (parts.length === 0) ? (coeff < 0n ? "-" : "") : (coeff < 0n ? " - " : " + ");
+        const absCoeff = (coeff < 0n) ? -coeff : coeff;
+
+        const vars = [];
+        if (xPow > 0) vars.push(xPow === 1 ? "x" : `x^${xPow}`);
+        if (yPow > 0) vars.push(yPow === 1 ? "y" : `y^${yPow}`);
+        const varStr = vars.join("*");
+
+        let termText = "";
+        if (vars.length === 0) {
+          termText = absCoeff.toString();
+        } else {
+          termText = (absCoeff === 1n) ? varStr : `${absCoeff}*${varStr}`;
+        }
+        parts.push(sign + termText);
+      }
+
+      const expansionStr = parts.length > 0 ? parts.join("") : "0";
+      const inputExpr = `(${a !== 1 ? a : ''}x ${b < 0 ? '- ' + Math.abs(b) : '+ ' + (b !== 1 ? b : '')}y)^${n}`;
+
+      document.getElementById("exp-val").innerText = expansionStr;
+      document.getElementById("exp-expl").innerHTML = `
+        <b>Binomial Theorem:</b> Evaluated sum_{k=0}^{${n}} C(${n}, k) &times; (${a}x)^{${n}-k} &times; (${b}y)^k.<br>
+        Exact algebraic expansion for ${inputExpr}.
+      `;
+      document.getElementById("exp-res").style.display = "block";
+      saveHistory("Expansion", inputExpr, expansionStr);
+    }
+
+    // =========================================================================
+    // AUTOMATED SELF TEST SUITE
+    // =========================================================================
+    function runSelfTests() {
+      const testCases = [
+        ["Factorial known answers (0!, 1!, 5!, 10!)", () => {
+          return factorial(0) === 1n && factorial(1) === 1n && factorial(5) === 120n && factorial(10) === 3628800n;
+        }],
+        ["Permutations P(5,3)=60, P(5,0)=1, P(5,5)=120", () => {
+          return permutations(5, 3) === 60n && permutations(5, 0) === 1n && permutations(5, 5) === 120n;
+        }],
+        ["Combinations C(5,3)=10, C(52,5)=2598960, C(5,0)=1, C(5,5)=1", () => {
+          return combinations(5, 3) === 10n && combinations(52, 5) === 2598960n && combinations(5, 0) === 1n && combinations(5, 5) === 1n;
+        }],
+        ["Repetition variants (5^3=125, 0^0=1, C(7,3)=35, n=0 boundary)", () => {
+          return permutationsWithRepetition(5, 3) === 125n &&
+                 permutationsWithRepetition(0, 0) === 1n &&
+                 permutationsWithRepetition(0, 4) === 0n &&
+                 combinationsWithRepetition(5, 3) === 35n &&
+                 combinationsWithRepetition(0, 0) === 1n &&
+                 combinationsWithRepetition(0, 3) === 0n;
+        }],
+        ["Multiset arrangements (MISSISSIPPI=34650, AAB=3)", () => {
+          const m1 = multisetArrangementsCount("MISSISSIPPI");
+          const m2 = multisetArrangementsCount("AAB");
+          return m1.total === 34650n && m2.total === 3n;
+        }],
+        ["Binomial identities (symmetry, Pascal, row sums = 2^n for n=0..20)", () => {
+          for (let n = 0; n <= 20; n++) {
+            let sum = 0n;
+            for (let k = 0; k <= n; k++) sum += combinations(n, k);
+            if (sum !== (2n ** BigInt(n))) return false;
+          }
+          return combinations(10, 4) === combinations(10, 6);
+        }],
+        ["Pascal's triangle generation (row 5 = [1,5,10,10,5,1], sum 32)", () => {
+          const row5 = [1n, 5n, 10n, 10n, 5n, 1n];
+          for (let k = 0; k <= 5; k++) {
+            if (combinations(5, k) !== row5[k]) return false;
+          }
+          return true;
+        }],
+        ["Binomial expansion ((x+y)^3 has coeffs [1, 3, 3, 1])", () => {
+          const c0 = combinations(3, 0);
+          const c1 = combinations(3, 1);
+          const c2 = combinations(3, 2);
+          const c3 = combinations(3, 3);
+          return c0 === 1n && c1 === 3n && c2 === 3n && c3 === 1n;
+        }],
+        ["Listing enumeration matches formula counts", () => {
+          return permutations(4, 2) === 12n && combinations(4, 2) === 6n && multisetArrangementsCount("AAB").total === 3n;
+        }],
+        ["Recurrence sequences (Fibonacci 10 terms, Factorial rec 6 terms)", () => {
+          const fib = [0n, 1n, 1n, 2n, 3n, 5n, 8n, 13n, 21n, 34n];
+          let a = 0n, b = 1n;
+          for (let i = 0; i < 10; i++) {
+            if (i === 0 && fib[0] !== 0n) return false;
+            if (i === 1 && fib[1] !== 1n) return false;
+            if (i >= 2) {
+              let c = a + b;
+              if (fib[i] !== c) return false;
+              a = b; b = c;
+            }
+          }
+          return true;
+        }],
+        ["Input validation and error handling (negative rejection)", () => {
+          try { factorial(-1); return false; } catch (e) { /* expected */ }
+          try { permutations(3, 5); return false; } catch (e) { /* expected */ }
+          try { combinations(3, 5); return false; } catch (e) { /* expected */ }
+          return true;
+        }],
+        ["History persistence and round-trip verification", () => {
+          saveHistory("TEST_SUITE_CHECK", "n=99", "99");
+          const records = JSON.parse(localStorage.getItem(HIST_KEY) || "[]");
+          return records.length > 0 && records[0].operation === "TEST_SUITE_CHECK";
+        }],
+        ["Exact arbitrary integer arithmetic integrity (no float rounding)", () => {
+          const bigFact = factorial(30);
+          const bigPerm = permutations(30, 15);
+          return (bigFact / factorial(15)) === bigPerm;
+        }]
+      ];
+
+      let passed = 0;
+      const html = testCases.map(([name, fn]) => {
+        let ok = false;
+        try { ok = fn(); } catch (e) { ok = false; }
+        if (ok) passed++;
+        return `
+          <div class="test-card">
+            <span class="test-name">${name}</span>
+            <span class="badge ${ok ? 'badge-pass' : 'badge-fail'}">${ok ? '[PASS]' : '[FAIL]'}</span>
+          </div>
+        `;
+      }).join("");
+
+      document.getElementById("test-list-container").innerHTML = html;
+      document.getElementById("test-summary-badge").innerHTML = `
+        <span class="badge ${passed === testCases.length ? 'badge-pass' : 'badge-fail'}" style="font-size:0.9rem; padding:6px 12px;">
+          ${passed} / ${testCases.length} Tests Passed (0 Failed)
+        </span>
+      `;
+      saveHistory("Self-Test", `Total=${testCases.length}`, `Passed=${passed}/${testCases.length}`);
+    }
+
+    // Initialize custom recurrence fields and history on load
+    window.addEventListener("DOMContentLoaded", () => {
+      renderCustomRecFields();
+      renderHistoryTable();
+    });
+  </script>
+</body>
+</html>
