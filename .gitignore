@@ -1,0 +1,10 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Generated visualization plots
+plots/
+
+# Temporary test history files
+test_run_temp_history.txt

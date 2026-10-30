@@ -3,11 +3,39 @@
 # Module: main.py - Interactive CLI interface, menu coordination, input validation, and formatting
 
 import sys
+import os
 import combinatorics
 import recurrence
 import sympy_tools
 import history_manager
 import tests
+import visualizer
+
+
+def prompt_and_show_visual(plot_func, *args, **kwargs):
+    """Prompts the user to generate and display a visual explanation chart."""
+    if not visualizer.is_visualizer_available():
+        print("  [Visualizer Note] Matplotlib is not installed. Visual explanation skipped.")
+        return
+
+    choice = get_integer_input("\nShow visual explanation? (1 = yes, 0 = no): ", 0, 1)
+    if choice == 1:
+        try:
+            path = plot_func(*args, **kwargs)
+            if path:
+                print("  Saved plot to " + path)
+                try:
+                    if hasattr(os, "startfile"):
+                        os.startfile(path)
+                    else:
+                        import subprocess
+                        opener = "open" if sys.platform == "darwin" else "xdg-open"
+                        subprocess.run([opener, path], check=False)
+                except Exception:
+                    pass
+        except Exception as e:
+            print("  [Visualizer Error] Could not generate plot: " + str(e))
+
 
 
 def format_large_number(num):
@@ -103,6 +131,7 @@ def handle_factorial():
         print("  SymPy check: " + note)
     
     history_manager.save_history_record("Factorial", "n=" + str(n), display_res)
+    prompt_and_show_visual(visualizer.plot_factorial, n)
 
 
 def handle_permutations():
@@ -121,7 +150,8 @@ def handle_permutations():
     print("  Result = " + display_res)
     print("  Explanation: Selecting and arranging " + str(r) + " items from " + str(n) + " items where order is distinct.")
     
-    history_manager.save_history_record("Permutations", "n=" + str(n) + ", r=" + str(r), display_res)
+    history_manager.save_history_record("Permutations", "n=" + str(n), display_res)
+    prompt_and_show_visual(visualizer.plot_permutations, n, r)
 
 
 def handle_combinations():
@@ -148,6 +178,7 @@ def handle_combinations():
         print("  SymPy check: " + note)
     
     history_manager.save_history_record("Combinations", "n=" + str(n) + ", r=" + str(r), display_res)
+    prompt_and_show_visual(visualizer.plot_combinations, n, r)
 
 
 def handle_comparison():
@@ -183,6 +214,7 @@ def handle_comparison():
     
     res_str = "P=" + format_large_number(p_val) + ", C=" + format_large_number(c_val)
     history_manager.save_history_record("Comparison", "n=" + str(n) + ", r=" + str(r), res_str)
+    prompt_and_show_visual(visualizer.plot_comparison, n, r)
 
 
 def handle_permutations_with_repetition():
@@ -203,6 +235,7 @@ def handle_permutations_with_repetition():
         print("  Note on 0^0: By convention, there is exactly 1 empty sequence of length 0.")
     
     history_manager.save_history_record("Permutations with Repetition", "n=" + str(n) + ", r=" + str(r), display_res)
+    prompt_and_show_visual(visualizer.plot_perm_with_repetition, n, r)
 
 
 def handle_combinations_with_repetition():
@@ -225,6 +258,7 @@ def handle_combinations_with_repetition():
     print("  For example, choosing 3 scoops from 5 ice-cream flavors = C(5 + 3 - 1, 3) = C(7, 3) = 35.")
     
     history_manager.save_history_record("Combinations with Repetition", "n=" + str(n) + ", r=" + str(r), display_res)
+    prompt_and_show_visual(visualizer.plot_comb_with_repetition, n, r)
 
 
 def handle_multiset_arrangements():
@@ -250,6 +284,7 @@ def handle_multiset_arrangements():
     print("  Example check: 'MISSISSIPPI' has 11 letters with 1 M, 4 I, 4 S, 2 P = 11!/(1!*4!*4!*2!) = 34650.")
     
     history_manager.save_history_record("Multiset Arrangements", "text='" + text + "'", display_res)
+    prompt_and_show_visual(visualizer.plot_multiset, text)
 
 
 def handle_listing():
@@ -297,6 +332,12 @@ def handle_listing():
         print("\n  [Truncated] " + str(total_found - limit_display) + " items were not shown to keep output clean.")
     
     history_manager.save_history_record("Listing (" + label + ")", "count=" + str(total_found), "MATCH" if is_match else "MISMATCH")
+    if sub_choice == 1:
+        prompt_and_show_visual(visualizer.plot_listing, "perm", n, r, "")
+    elif sub_choice == 2:
+        prompt_and_show_visual(visualizer.plot_listing, "comb", n, r, "")
+    else:
+        prompt_and_show_visual(visualizer.plot_listing, "multiset", 0, 0, word)
 
 
 def handle_binomial_identities():
@@ -335,6 +376,7 @@ def handle_binomial_identities():
     print("   Status: " + row_sum_status)
     
     history_manager.save_history_record("Binomial Identities", "n=" + str(n) + ", r=" + str(r), "All verified")
+    prompt_and_show_visual(visualizer.plot_binomial_identities, n, r)
 
 
 def handle_pascal_triangle():
@@ -362,6 +404,7 @@ def handle_pascal_triangle():
     print("  - Row 5 values: 1 5 10 10 5 1 with total row sum 32 (= 2^5).")
     
     history_manager.save_history_record("Pascal's Triangle", "rows=" + str(rows), "Generated " + str(rows) + " rows")
+    prompt_and_show_visual(visualizer.plot_pascal_triangle, rows)
 
 
 def handle_recurrence():
@@ -424,6 +467,8 @@ def handle_recurrence():
     print("  symbolic solution (which expresses a(n) as a direct function of n without previous terms).")
     
     history_manager.save_history_record(rec_name, details + ", terms=" + str(terms), "Generated " + str(len(seq)) + " terms")
+    rec_type_key = "fibonacci" if choice == 1 else ("factorial" if choice == 2 else "custom")
+    prompt_and_show_visual(visualizer.plot_recurrence, rec_type_key, seq, rec_name)
 
 
 def handle_binomial_expansion():
@@ -451,6 +496,7 @@ def handle_binomial_expansion():
         print("  SymPy output: " + sym_expanded)
     
     history_manager.save_history_record("Binomial Expansion", "n=" + str(n) + ", a=" + str(a) + ", b=" + str(b), formatted_expansion)
+    prompt_and_show_visual(visualizer.plot_binomial_expansion, n, a, b)
 
 
 def handle_sympy_verification():
@@ -563,6 +609,37 @@ def handle_self_test():
     history_manager.save_history_record("Self-Test", "Total=" + str(summary["total"]), "Passed=" + str(summary["passed"]) + "/" + str(summary["total"]))
 
 
+def handle_visual_gallery():
+    print("\n--- 16. DEMO VISUAL EXPLANATION GALLERY ---")
+    print("Generating all 12 visual explanation charts into the plots/ folder...")
+    if not visualizer.is_visualizer_available():
+        print("  [Visualizer Note] Matplotlib is not installed. To enable visual charts, run: pip install matplotlib")
+        return
+    
+    plots_list = visualizer.generate_all_demo_plots()
+    print("\nGenerated " + str(len(plots_list)) + " visual charts:")
+    for idx, item in enumerate(plots_list, 1):
+        desc, path = item
+        print("  " + str(idx).rjust(2) + ". " + desc.ljust(45) + " -> " + path)
+    
+    print("\nOptions:")
+    print("  Enter chart number (1-12) to open that chart in default image viewer")
+    print("  Enter 0 to return to main menu")
+    choice = get_integer_input("Choice (0-12): ", 0, len(plots_list))
+    if choice > 0:
+        target_path = plots_list[choice - 1][1]
+        try:
+            if hasattr(os, "startfile"):
+                os.startfile(target_path)
+            else:
+                import subprocess
+                opener = "open" if sys.platform == "darwin" else "xdg-open"
+                subprocess.run([opener, target_path], check=False)
+            print("  Opened: " + target_path)
+        except Exception:
+            print("  [Viewer Note] File saved at: " + target_path)
+
+
 # =============================================================================
 # MAIN INTERACTIVE LOOP
 # =============================================================================
@@ -586,6 +663,7 @@ def print_menu():
     print("13. SymPy verification (optional formal check)")
     print("14. History (view all / search)")
     print("15. Run self-test (PASS/FAIL list)")
+    print("16. Visual gallery (generate all 12 demo plots)")
     print(" 0. Exit")
     print("=" * 70)
 
@@ -613,12 +691,13 @@ def main():
         12: handle_binomial_expansion,
         13: handle_sympy_verification,
         14: handle_history,
-        15: handle_self_test
+        15: handle_self_test,
+        16: handle_visual_gallery
     }
     
     while True:
         print_menu()
-        choice = get_integer_input("Select an option (0-15): ", 0, 15)
+        choice = get_integer_input("Select an option (0-16): ", 0, 16)
         
         if choice == 0:
             print("\nThank you for using Combinatorial Counting and Permutation Analyzer. Goodbye!")
@@ -631,7 +710,7 @@ def main():
             except Exception as e:
                 print("\n[Unexpected Error] An issue occurred during calculation: " + str(e))
         else:
-            print("Invalid selection. Please choose an integer between 0 and 15.")
+            print("Invalid selection. Please choose an integer between 0 and 16.")
 
 
 if __name__ == "__main__":

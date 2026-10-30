@@ -3,10 +3,17 @@
 # Module: tests.py - Plain-function automated verification suite
 
 import os
+import threading
+import urllib.request
+import urllib.error
+from http.server import ThreadingHTTPServer
+
 import combinatorics
 import recurrence
 import sympy_tools
 import history_manager
+import visualizer
+import web_viewer
 
 
 def test_factorial_known_answers():
@@ -248,6 +255,245 @@ def test_sympy_integration_if_present():
     return "SymPy symbolic verification (factorial, binomial, expansion, rsolve)"
 
 
+def test_visualizer_creates_files():
+    """Validates that visualizer functions generate non-empty PNG files."""
+    if not visualizer.is_matplotlib_available():
+        return "Visualizer file creation (Matplotlib not installed, skipped)"
+    
+    p1 = visualizer.plot_factorial(5)
+    assert p1 is not None
+    assert os.path.exists(p1)
+    assert os.path.getsize(p1) > 1000
+    
+    p2 = visualizer.plot_combinations(5, 2)
+    assert p2 is not None
+    assert os.path.exists(p2)
+    assert os.path.getsize(p2) > 1000
+    return "Visualizer PNG creation (valid non-empty files saved to plots/)"
+
+
+def test_visualizer_big_numbers():
+    """Validates that huge integers (500!) do not raise OverflowError in plotting."""
+    if not visualizer.is_matplotlib_available():
+        return "Visualizer big numbers (Matplotlib not installed, skipped)"
+    
+    # 500! has over 1,134 digits, which overflows standard float()
+    p_fact = visualizer.plot_factorial(500)
+    assert p_fact is not None
+    assert os.path.exists(p_fact)
+    
+    p_perm = visualizer.plot_permutations(500, 250)
+    assert p_perm is not None
+    assert os.path.exists(p_perm)
+    return "Visualizer big-integer safety (safe_log10 handles 500! without float overflow)"
+
+
+def test_visualizer_edge_cases():
+    """Validates visualizer behavior on zero and boundary values."""
+    if not visualizer.is_matplotlib_available():
+        return "Visualizer edge cases (Matplotlib not installed, skipped)"
+    
+    p_zero = visualizer.plot_factorial(0)
+    assert p_zero is not None
+    
+    p_perm_zero = visualizer.plot_permutations(0, 0)
+    assert p_perm_zero is not None
+    
+    p_comb_zero = visualizer.plot_combinations(0, 0)
+    assert p_comb_zero is not None
+    
+    p_pascal_one = visualizer.plot_pascal_triangle(1)
+    assert p_pascal_one is not None
+    
+    p_list_min = visualizer.plot_listing("perm", 1, 1, "")
+    assert p_list_min is not None
+    return "Visualizer boundary edge cases (n=0, 0!=1, single-row Pascal)"
+
+
+def test_visualizer_graceful_when_unavailable():
+    """Validates that visualizer functions degrade gracefully when matplotlib is absent."""
+    orig_state = visualizer.MATPLOTLIB_AVAILABLE
+    try:
+        visualizer.MATPLOTLIB_AVAILABLE = False
+        res = visualizer.plot_factorial(5)
+        assert res is None
+        res_gallery = visualizer.generate_all_demo_plots()
+        assert res_gallery == []
+    finally:
+        visualizer.MATPLOTLIB_AVAILABLE = orig_state
+    
+    return "Visualizer graceful degradation (returns None when matplotlib is unavailable)"
+
+
+def start_test_server():
+    """Starts a local ThreadingHTTPServer on an ephemeral port (port 0) for testing."""
+    server = ThreadingHTTPServer(("127.0.0.1", 0), web_viewer.WebViewerHandler)
+    server.daemon_threads = True
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, port
+
+
+def test_plot_endpoint_returns_png():
+    """Validates that all 12 /plot/<op> endpoints return 200, image/png, and valid PNG magic."""
+    server, port = start_test_server()
+    base_url = f"http://127.0.0.1:{port}"
+    
+    endpoints = [
+        "/plot/factorial?n=5",
+        "/plot/permutations?n=5&r=3",
+        "/plot/combinations?n=5&r=3",
+        "/plot/comparison?n=5&r=3",
+        "/plot/permrep?n=4&r=3",
+        "/plot/combrep?n=4&r=3",
+        "/plot/multiset?word=AAB",
+        "/plot/listing?mode=perm&n=3&r=2",
+        "/plot/identities?n=5&r=2",
+        "/plot/pascal?rows=5",
+        "/plot/recurrence?type=fib&terms=10",
+        "/plot/expansion?n=3&a=1&b=1"
+    ]
+    
+    png_magic = b"\x89PNG\r\n\x1a\n"
+    
+    try:
+        for ep in endpoints:
+            req = urllib.request.Request(base_url + ep)
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                assert resp.status == 200, f"Endpoint {ep} did not return 200"
+                content_type = resp.headers.get("Content-Type", "")
+                assert "image/png" in content_type, f"Endpoint {ep} Content-Type was {content_type}"
+                body = resp.read()
+                assert body.startswith(png_magic), f"Endpoint {ep} body does not start with PNG magic"
+                assert len(body) > 1000, f"Endpoint {ep} body too short ({len(body)} bytes)"
+    finally:
+        server.shutdown()
+        server.server_close()
+        
+    return "Plot endpoints return valid PNG for all 12 operations (HTTP 200, magic bytes, length > 1000)"
+
+
+def test_plot_endpoint_dynamic_inputs():
+    """Validates dynamic plot generation for changing inputs (n=4, 5, 720) producing distinct PNGs."""
+    server, port = start_test_server()
+    base_url = f"http://127.0.0.1:{port}"
+    png_magic = b"\x89PNG\r\n\x1a\n"
+    
+    try:
+        with urllib.request.urlopen(f"{base_url}/plot/factorial?n=4", timeout=5) as resp:
+            b4 = resp.read()
+        with urllib.request.urlopen(f"{base_url}/plot/factorial?n=5", timeout=5) as resp:
+            b5 = resp.read()
+        with urllib.request.urlopen(f"{base_url}/plot/factorial?n=720", timeout=5) as resp:
+            b720 = resp.read()
+            
+        assert b4.startswith(png_magic), "n=4 plot is not a valid PNG"
+        assert b5.startswith(png_magic), "n=5 plot is not a valid PNG"
+        assert b720.startswith(png_magic), "n=720 plot is not a valid PNG"
+        
+        # Verify dynamic rendering produces mutually different byte sequences
+        assert b4 != b5, "n=4 and n=5 returned identical plots"
+        assert b5 != b720, "n=5 and n=720 returned identical plots"
+        assert b4 != b720, "n=4 and n=720 returned identical plots"
+        
+        assert len(b4) > 1000 and len(b5) > 1000 and len(b720) > 1000
+    finally:
+        server.shutdown()
+        server.server_close()
+        
+    return "Dynamic plot inputs produce mutually distinct PNGs (n=4, n=5, n=720 without overflow)"
+
+
+def test_plot_endpoint_bad_input():
+    """Validates that malformed, out-of-range, or injected inputs return HTTP 400 or 404 plain text."""
+    server, port = start_test_server()
+    base_url = f"http://127.0.0.1:{port}"
+    
+    bad_cases_400 = [
+        "/plot/factorial?n=-1",
+        "/plot/combinations?n=3&r=5",
+        "/plot/factorial",
+        "/plot/factorial?n=abc",
+        "/plot/recurrence?type=custom&terms=5&coeffs=5000&inits=1",
+        "/plot/multiset?word=<script>",
+        "/plot/listing?mode=unknown&n=3&r=2"
+    ]
+    
+    try:
+        for ep in bad_cases_400:
+            try:
+                urllib.request.urlopen(base_url + ep, timeout=5)
+                assert False, f"Expected 400 for {ep}, but succeeded."
+            except urllib.error.HTTPError as e:
+                assert e.code == 400, f"Expected HTTP 400 for {ep}, got {e.code}"
+                content_type = e.headers.get("Content-Type", "")
+                assert "text/plain" in content_type, f"Expected text/plain for {ep}, got {content_type}"
+                err_text = e.read().decode("utf-8")
+                assert len(err_text) > 0, f"Expected non-empty error message for {ep}"
+
+        # Unknown operation returns 404
+        try:
+            urllib.request.urlopen(f"{base_url}/plot/unknown_op?n=5", timeout=5)
+            assert False, "Expected 404 for unknown operation, but succeeded."
+        except urllib.error.HTTPError as e:
+            assert e.code == 404, f"Expected HTTP 404 for unknown operation, got {e.code}"
+            assert "text/plain" in e.headers.get("Content-Type", "")
+    finally:
+        server.shutdown()
+        server.server_close()
+        
+    return "Bad plot inputs return HTTP 400 / 404 with plain-text explanation"
+
+
+def test_server_serves_only_allowed_paths():
+    """Validates server routing whitelist: serves index.html, rejects source files and traversal with 404."""
+    server, port = start_test_server()
+    base_url = f"http://127.0.0.1:{port}"
+    
+    try:
+        # Route A: Root serves index.html
+        with urllib.request.urlopen(f"{base_url}/", timeout=5) as resp:
+            assert resp.status == 200
+            assert "text/html" in resp.headers.get("Content-Type", "")
+            body = resp.read().decode("utf-8")
+            assert "<!DOCTYPE html>" in body or "<html" in body
+            
+        with urllib.request.urlopen(f"{base_url}/index.html", timeout=5) as resp:
+            assert resp.status == 200
+            assert "text/html" in resp.headers.get("Content-Type", "")
+            
+        # Disallowed files return 404
+        disallowed = ["/main.py", "/history.txt", "/recurrence.py", "/favicon.ico", "/../main.py"]
+        for path in disallowed:
+            try:
+                urllib.request.urlopen(f"{base_url}{path}", timeout=5)
+                assert False, f"Expected 404 for {path}, but succeeded."
+            except urllib.error.HTTPError as e:
+                assert e.code == 404, f"Expected HTTP 404 for {path}, got {e.code}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        
+    return "Server security whitelist (serves index.html, blocks source files and traversal with 404)"
+
+
+def test_server_binds_localhost_only():
+    """Validates that the server binds exclusively to localhost (127.0.0.1) for safety."""
+    assert web_viewer.HOST == "127.0.0.1", f"Expected HOST 127.0.0.1, got {web_viewer.HOST}"
+    assert web_viewer.HOST != "0.0.0.0", "HOST cannot be 0.0.0.0 (security risk)"
+    
+    server, port = start_test_server()
+    try:
+        bound_ip = server.server_address[0]
+        assert bound_ip == "127.0.0.1", f"Server bound to {bound_ip} instead of 127.0.0.1"
+    finally:
+        server.shutdown()
+        server.server_close()
+        
+    return "Server localhost binding (127.0.0.1 only, prevents public exposure)"
+
+
 def run_all_tests():
     """Executes all test functions and returns a summary dictionary."""
     test_functions = [
@@ -264,6 +510,15 @@ def run_all_tests():
         test_invalid_input_rejection,
         test_history_persistence,
         test_sympy_integration_if_present,
+        test_visualizer_creates_files,
+        test_visualizer_big_numbers,
+        test_visualizer_edge_cases,
+        test_visualizer_graceful_when_unavailable,
+        test_plot_endpoint_returns_png,
+        test_plot_endpoint_dynamic_inputs,
+        test_plot_endpoint_bad_input,
+        test_server_serves_only_allowed_paths,
+        test_server_binds_localhost_only
     ]
     
     passed_count = 0

@@ -1,2 +1,8 @@
+# Dependencies for Combinatorial Counting and Permutation Analyzer
+# Core project runs on pure standard library.
+
 # Optional dependency for formal verification
 sympy>=1.8,<=1.14.0
+
+# Visual explanation charts
+matplotlib>=3.5.0

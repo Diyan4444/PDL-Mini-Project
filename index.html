@@ -264,6 +264,46 @@
     }
     .expl-box b { color: #0f172a; }
 
+    /* Visual explanation box */
+    .plot-box {
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px dashed var(--border);
+    }
+    .plot-box-title {
+      font-size: 0.82rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+    .plot-box-status {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      font-style: italic;
+      padding: 6px 0;
+    }
+    .plot-box-error {
+      font-size: 0.85rem;
+      color: var(--danger);
+      background: var(--danger-light);
+      border-left: 3px solid var(--danger);
+      padding: 8px 12px;
+      border-radius: 0 4px 4px 0;
+      margin-top: 6px;
+      line-height: 1.4;
+    }
+    .plot-box img {
+      max-width: 100%;
+      height: auto;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      display: block;
+      margin-top: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+
     /* Badges */
     .badge {
       display: inline-block;
@@ -1081,6 +1121,135 @@
     }
 
     // =========================================================================
+    // VISUAL EXPLANATION HELPER (DYNAMIC MATPLOTLIB INTEGRATION)
+    // =========================================================================
+    const plotRequestTokens = {};
+    const plotObjectUrls = {};
+
+    function showPlot(resultCardId, operation, paramsObject, altText) {
+      const resultCard = document.getElementById(resultCardId);
+      if (!resultCard) return;
+
+      // Locate or create .plot-box container inside this result card
+      let plotBox = resultCard.querySelector(".plot-box");
+      if (!plotBox) {
+        plotBox = document.createElement("div");
+        plotBox.className = "plot-box";
+
+        const titleDiv = document.createElement("div");
+        titleDiv.className = "plot-box-title";
+        titleDiv.textContent = "Visual Explanation";
+        plotBox.appendChild(titleDiv);
+
+        const statusDiv = document.createElement("div");
+        statusDiv.className = "plot-box-status";
+        plotBox.appendChild(statusDiv);
+
+        const errorDiv = document.createElement("div");
+        errorDiv.className = "plot-box-error";
+        errorDiv.style.display = "none";
+        plotBox.appendChild(errorDiv);
+
+        const imgEl = document.createElement("img");
+        imgEl.style.display = "none";
+        plotBox.appendChild(imgEl);
+
+        // Placement rules (Addendum E)
+        if (resultCardId === "list-res") {
+          const listContainer = document.getElementById("list-container");
+          if (listContainer) {
+            listContainer.parentNode.insertBefore(plotBox, listContainer);
+          } else {
+            resultCard.appendChild(plotBox);
+          }
+        } else if (resultCardId === "rec-res") {
+          const recList = document.getElementById("rec-terms-list");
+          if (recList) {
+            recList.parentNode.insertBefore(plotBox, recList);
+          } else {
+            resultCard.appendChild(plotBox);
+          }
+        } else {
+          resultCard.appendChild(plotBox);
+        }
+      }
+
+      const statusDiv = plotBox.querySelector(".plot-box-status");
+      const errorDiv = plotBox.querySelector(".plot-box-error");
+      const imgEl = plotBox.querySelector("img");
+
+      // Check if user double-clicked index.html directly via file: protocol
+      if (location.protocol === "file:") {
+        statusDiv.style.display = "none";
+        imgEl.style.display = "none";
+        errorDiv.style.display = "block";
+        errorDiv.textContent = "Visual explanation unavailable. Start the Python server with: python web_viewer.py and open http://127.0.0.1:8000";
+        return;
+      }
+
+      // Generate a new request token for this operation to prevent stale overwrites
+      const currentToken = (plotRequestTokens[resultCardId] || 0) + 1;
+      plotRequestTokens[resultCardId] = currentToken;
+
+      statusDiv.style.display = "block";
+      statusDiv.textContent = "Generating visual explanation...";
+      errorDiv.style.display = "none";
+
+      const queryParams = new URLSearchParams(paramsObject);
+      queryParams.set("_", Date.now().toString());
+      const url = "/plot/" + encodeURIComponent(operation) + "?" + queryParams.toString();
+
+      fetch(url)
+        .then(async (response) => {
+          if (currentToken !== plotRequestTokens[resultCardId]) return;
+
+          if (response.ok) {
+            const blob = await response.blob();
+            if (currentToken !== plotRequestTokens[resultCardId]) return;
+
+            // Revoke previous object URL if any to prevent memory leaks
+            if (plotObjectUrls[resultCardId]) {
+              URL.revokeObjectURL(plotObjectUrls[resultCardId]);
+            }
+            const objectUrl = URL.createObjectURL(blob);
+            plotObjectUrls[resultCardId] = objectUrl;
+
+            imgEl.src = objectUrl;
+            imgEl.alt = altText || `Visual explanation for ${operation}`;
+            imgEl.style.display = "block";
+            statusDiv.style.display = "none";
+            errorDiv.style.display = "none";
+          } else if (response.status === 400) {
+            const errText = await response.text();
+            if (currentToken !== plotRequestTokens[resultCardId]) return;
+            imgEl.style.display = "none";
+            statusDiv.style.display = "none";
+            errorDiv.style.display = "block";
+            errorDiv.textContent = "Visual not available for these inputs: " + errText;
+          } else if (response.status === 500) {
+            if (currentToken !== plotRequestTokens[resultCardId]) return;
+            imgEl.style.display = "none";
+            statusDiv.style.display = "none";
+            errorDiv.style.display = "block";
+            errorDiv.textContent = "Visual explanation could not be generated.";
+          } else {
+            if (currentToken !== plotRequestTokens[resultCardId]) return;
+            imgEl.style.display = "none";
+            statusDiv.style.display = "none";
+            errorDiv.style.display = "block";
+            errorDiv.textContent = "Visual explanation unavailable.";
+          }
+        })
+        .catch(() => {
+          if (currentToken !== plotRequestTokens[resultCardId]) return;
+          imgEl.style.display = "none";
+          statusDiv.style.display = "none";
+          errorDiv.style.display = "block";
+          errorDiv.textContent = "Visual explanation unavailable. Start the Python server with: python web_viewer.py and open http://127.0.0.1:8000";
+        });
+    }
+
+    // =========================================================================
     // ACTION HANDLERS
     // =========================================================================
 
@@ -1099,6 +1268,7 @@
       `;
       document.getElementById("fact-res").style.display = "block";
       saveHistory("Factorial", `n=${n}`, display);
+      showPlot("fact-res", "factorial", { n: n }, `Visual explanation for ${n}!`);
     }
 
     function calcPermutations() {
@@ -1117,6 +1287,7 @@
       `;
       document.getElementById("perm-res").style.display = "block";
       saveHistory("Permutations", `n=${n}, r=${r}`, display);
+      showPlot("perm-res", "permutations", { n: n, r: r }, `Visual explanation for P(${n}, ${r})`);
     }
 
     function calcCombinations() {
@@ -1135,6 +1306,7 @@
       `;
       document.getElementById("comb-res").style.display = "block";
       saveHistory("Combinations", `n=${n}, r=${r}`, display);
+      showPlot("comb-res", "combinations", { n: n, r: r }, `Visual explanation for C(${n}, ${r})`);
     }
 
     function calcComparison() {
@@ -1179,6 +1351,7 @@
 
       document.getElementById("comp-res").style.display = "block";
       saveHistory("Comparison", `n=${n}, r=${r}`, `P=${formatLargeNum(p)}, C=${formatLargeNum(c)}`);
+      showPlot("comp-res", "comparison", { n: n, r: r }, `Visual comparison for P(${n}, ${r}) vs C(${n}, ${r})`);
     }
 
     function calcPermRep() {
@@ -1197,6 +1370,7 @@
       `;
       document.getElementById("prep-res").style.display = "block";
       saveHistory("Perm w/ Rep", `n=${n}, r=${r}`, display);
+      showPlot("prep-res", "permrep", { n: n, r: r }, `Visual explanation for ${n}^${r}`);
     }
 
     function calcCombRep() {
@@ -1216,6 +1390,7 @@
       `;
       document.getElementById("crep-res").style.display = "block";
       saveHistory("Comb w/ Rep", `n=${n}, r=${r}`, display);
+      showPlot("crep-res", "combrep", { n: n, r: r }, `Visual explanation for multichoose C(${n}+${r}-1, ${r})`);
     }
 
     function calcMultiset() {
@@ -1237,6 +1412,7 @@
       `;
       document.getElementById("multi-res").style.display = "block";
       saveHistory("Multiset", `text='${text}'`, display);
+      showPlot("multi-res", "multiset", { word: text }, `Visual explanation for multiset '${text}'`);
     }
 
     function toggleListInputs() {
@@ -1322,6 +1498,14 @@
 
       document.getElementById("list-res").style.display = "block";
       saveHistory("Listing (" + mode + ")", `count=${items.length}`, match ? "MATCH" : "MISMATCH");
+      if (mode === "multi") {
+        const wordVal = document.getElementById("list-word").value.trim();
+        showPlot("list-res", "listing", { mode: "multi", word: wordVal }, `Visual listing for multiset '${wordVal}'`);
+      } else {
+        const listN = parseInt(document.getElementById("list-n").value);
+        const listR = parseInt(document.getElementById("list-r").value);
+        showPlot("list-res", "listing", { mode: mode, n: listN, r: listR }, `Visual listing for ${mode === 'perm' ? 'P' : 'C'}(${listN}, ${listR})`);
+      }
     }
 
     function verifyIdentities() {
@@ -1370,6 +1554,7 @@
 
       document.getElementById("id-res").style.display = "block";
       saveHistory("Identities", `n=${n}, r=${r}`, "All verified");
+      showPlot("id-res", "identities", { n: n, r: r }, `Visual explanation for binomial identities n=${n}, r=${r}`);
     }
 
     function renderPascal() {
@@ -1405,6 +1590,7 @@
 
       document.getElementById("pascal-res").style.display = "block";
       saveHistory("Pascal Triangle", `rows=${rows}`, `Rendered ${rows} rows`);
+      showPlot("pascal-res", "pascal", { rows: rows }, `Visual explanation for Pascal's triangle with ${rows} rows`);
     }
 
     function toggleRecInputs() {
@@ -1446,6 +1632,9 @@
 
       let seq = [];
       let title = "";
+      let customK = 2;
+      let customCoeffs = [];
+      let customInits = [];
 
       if (type === "fib") {
         title = "Fibonacci Sequence: F(n) = F(n-1) + F(n-2)";
@@ -1462,6 +1651,7 @@
         }
       } else {
         const k = parseInt(document.getElementById("rec-order").value);
+        customK = k;
         const coeffs = [];
         const inits = [];
         for (let i = 1; i <= k; i++) {
@@ -1475,6 +1665,8 @@
           if (isNaN(a)) { alert(`Invalid initial value a(${i})`); return; }
           inits.push(BigInt(a));
         }
+        customCoeffs = coeffs;
+        customInits = inits;
 
         title = `Custom Linear Recurrence (Order ${k})`;
         seq = inits.slice(0, terms);
@@ -1496,6 +1688,16 @@
 
       document.getElementById("rec-res").style.display = "block";
       saveHistory(title, `terms=${terms}`, `Generated ${seq.length} terms`);
+
+      if (type === "fib") {
+        showPlot("rec-res", "recurrence", { type: "fib", terms: terms }, "Visual explanation for Fibonacci sequence");
+      } else if (type === "fact") {
+        showPlot("rec-res", "recurrence", { type: "fact", terms: terms }, "Visual explanation for factorial recurrence");
+      } else {
+        const coeffsStr = customCoeffs.map(c => c.toString()).join(",");
+        const initsStr = customInits.map(a => a.toString()).join(",");
+        showPlot("rec-res", "recurrence", { type: "custom", order: customK, coeffs: coeffsStr, inits: initsStr, terms: terms }, `Visual explanation for custom recurrence order ${customK}`);
+      }
     }
 
     function calcExpansion() {
@@ -1544,6 +1746,7 @@
       `;
       document.getElementById("exp-res").style.display = "block";
       saveHistory("Expansion", inputExpr, expansionStr);
+      showPlot("exp-res", "expansion", { n: n, a: a, b: b }, `Visual explanation for expansion of ${inputExpr}`);
     }
 
     // =========================================================================
