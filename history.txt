@@ -1,2 +1,11 @@
-2026-10-29 19:41:08|Factorial|n=999|40238726007709377354...0000000000 (2565 digits)
-2026-10-30 17:12:38|Self-Test|Total=17|Passed=17/17
+2026-11-02 07:55:32|Factorial|n=5|120
+2026-11-02 07:55:32|Factorial|n=5|120
+2026-11-02 07:55:37|Circular Permutations|n=5, r=3, refl=False|20
+2026-11-02 07:55:37|Circular Permutations|n=5, r=3, refl=no|20
+2026-11-02 07:55:41|Derangements|n=5|44
+2026-11-02 07:55:41|Derangements|n=5|44
+2026-11-02 07:55:54|Perm w/ Rep|n=5, r=3|125
+2026-11-02 07:58:12|Identities|n=5, r=2|All verified
+2026-11-02 07:58:18|Pascal Triangle|rows=6|Rendered 6 rows
+2026-11-02 07:58:21|Expansion|(x + y)^3|x^3 + 3*x^2*y + 3*x*y^2 + y^3
+2026-11-02 07:58:27|Fibonacci Sequence: F(n) = F(n-1) + F(n-2)|terms=10|Generated 10 terms

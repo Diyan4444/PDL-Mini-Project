@@ -55,6 +55,10 @@ def get_matplotlib_install_message():
 # PRIVATE UTILITY HELPERS
 # =============================================================================
 
+def is_strict_int(val):
+    return isinstance(val, int) and not isinstance(val, bool)
+
+
 def safe_log10(val):
     """Safely calculates log10 for arbitrarily large integers.
     
@@ -141,7 +145,7 @@ def plot_factorial(n, as_bytes=False):
     """
     if not is_matplotlib_available():
         return None
-    if not isinstance(n, int):
+    if not is_strict_int(n):
         raise TypeError("Factorial argument must be an integer.")
     if n < 0 or n > 1000:
         raise ValueError("n must satisfy 0 <= n <= 1000.")
@@ -225,7 +229,7 @@ def plot_permutations(n, r, as_bytes=False):
     """
     if not is_matplotlib_available():
         return None
-    if not isinstance(n, int) or not isinstance(r, int):
+    if not is_strict_int(n) or not is_strict_int(r):
         raise TypeError("n and r must both be integers.")
     if n < 0 or r < 0 or r > n or n > 1000:
         raise ValueError("Requires 0 <= r <= n <= 1000.")
@@ -316,7 +320,7 @@ def plot_combinations(n, r, as_bytes=False):
     """
     if not is_matplotlib_available():
         return None
-    if not isinstance(n, int) or not isinstance(r, int):
+    if not is_strict_int(n) or not is_strict_int(r):
         raise TypeError("n and r must both be integers.")
     if n < 0 or r < 0 or r > n or n > 1000:
         raise ValueError("Requires 0 <= r <= n <= 1000.")
@@ -339,6 +343,10 @@ def plot_combinations(n, r, as_bytes=False):
 
     log_c_vals = [safe_log10(combinatorics.combinations(n, k)) for k in k_range]
     bar_colors = [CLR_HIGHLIGHT if k == r else CLR_COMB for k in k_range]
+
+    max_c_log = max(log_c_vals) if log_c_vals else 0.0
+    if max_c_log == 0.0:
+        ax_bar.set_ylim(0, 1.0)
 
     ax_bar.bar([str(k) for k in k_range], log_c_vals, color=bar_colors, width=0.65, edgecolor="#1e293b", linewidth=0.5)
     ax_bar.set_xlabel("Subset Size k", fontsize=10, fontweight="bold")
@@ -395,7 +403,7 @@ def plot_comparison(n, r, as_bytes=False):
     """
     if not is_matplotlib_available():
         return None
-    if not isinstance(n, int) or not isinstance(r, int):
+    if not is_strict_int(n) or not is_strict_int(r):
         raise TypeError("n and r must both be integers.")
     if n < 0 or r < 0 or r > n or n > 1000:
         raise ValueError("Requires 0 <= r <= n <= 1000.")
@@ -438,6 +446,10 @@ def plot_comparison(n, r, as_bytes=False):
     decomp_vals = [log_c, log_rf, log_p]
     decomp_colors = [CLR_COMB, CLR_NEUTRAL, CLR_PERM]
 
+    max_decomp = max(decomp_vals) if decomp_vals else 0.0
+    if max_decomp == 0.0:
+        ax_decomp.set_ylim(0, 1.0)
+
     ax_decomp.bar(decomp_labels, decomp_vals, color=decomp_colors, width=0.55, edgecolor="#0f172a", linewidth=0.8)
     ax_decomp.set_ylabel("log10( Value )", fontsize=10, fontweight="bold")
     status_str = "VERIFIED MATCH" if is_valid else "FAILED"
@@ -460,7 +472,7 @@ def plot_perm_with_repetition(n, r, as_bytes=False):
     """
     if not is_matplotlib_available():
         return None
-    if not isinstance(n, int) or not isinstance(r, int):
+    if not is_strict_int(n) or not is_strict_int(r):
         raise TypeError("n and r must both be integers.")
     if n < 0 or r < 0 or n > 1000 or r > 1000:
         raise ValueError("Requires 0 <= n, r <= 1000.")
@@ -546,7 +558,7 @@ def plot_comb_with_repetition(n, r, as_bytes=False):
     """
     if not is_matplotlib_available():
         return None
-    if not isinstance(n, int) or not isinstance(r, int):
+    if not is_strict_int(n) or not is_strict_int(r):
         raise TypeError("n and r must both be integers.")
     if n < 0 or r < 0 or n > 1000 or r > 1000:
         raise ValueError("Requires 0 <= n, r <= 1000.")
@@ -780,7 +792,7 @@ def plot_binomial_identities(n, r, as_bytes=False):
     """
     if not is_matplotlib_available():
         return None
-    if not isinstance(n, int) or not isinstance(r, int):
+    if not is_strict_int(n) or not is_strict_int(r):
         raise TypeError("n and r must both be integers.")
     if n < 0 or r < 0 or r > n or n > 1000:
         raise ValueError("Requires 0 <= r <= n <= 1000.")
@@ -848,7 +860,7 @@ def plot_pascal_triangle(num_rows, as_bytes=False):
     """
     if not is_matplotlib_available():
         return None
-    if not isinstance(num_rows, int):
+    if not is_strict_int(num_rows):
         raise TypeError("num_rows must be an integer.")
     if num_rows < 1 or num_rows > 15:
         raise ValueError("num_rows must be between 1 and 15.")
@@ -1012,7 +1024,7 @@ def plot_binomial_expansion(n, a, b, as_bytes=False):
     """
     if not is_matplotlib_available():
         return None
-    if not isinstance(n, int) or not isinstance(a, int) or not isinstance(b, int):
+    if not is_strict_int(n) or not is_strict_int(a) or not is_strict_int(b):
         raise TypeError("n, a, and b must be integers.")
     if n < 0 or n > 20 or abs(a) > 10 or abs(b) > 10:
         raise ValueError("Requires 0 <= n <= 20 and |a|, |b| <= 10.")
@@ -1039,7 +1051,9 @@ def plot_binomial_expansion(n, a, b, as_bytes=False):
         coeffs.append(coeff)
         bar_colors.append(CLR_PERM if coeff >= 0 else CLR_NEGATIVE)
 
-    ax_coeffs.bar(term_labels, coeffs, color=bar_colors, width=0.6, edgecolor="#0f172a", linewidth=0.5)
+    # Convert to floats for plotting to prevent OverflowError on huge integer coefficients
+    float_coeffs = [float(c) for c in coeffs]
+    ax_coeffs.bar(term_labels, float_coeffs, color=bar_colors, width=0.6, edgecolor="#0f172a", linewidth=0.5)
     ax_coeffs.axhline(0, color="#64748b", lw=1.0)
     ax_coeffs.set_xlabel("Algebraic Term", fontsize=10, fontweight="bold")
     ax_coeffs.set_ylabel("Signed Coefficient", fontsize=10, fontweight="bold")
@@ -1050,14 +1064,22 @@ def plot_binomial_expansion(n, a, b, as_bytes=False):
     ax_coeffs.tick_params(axis="x", rotation=30)
     ax_coeffs.grid(axis="y", linestyle="--", alpha=0.5)
 
+    max_abs = max(abs(c) for c in coeffs) if coeffs else 0
+    float_max_abs = float(max_abs) if max_abs > 0 else 1.0
+
     for idx, val in enumerate(coeffs):
-        offset = 0.2 if val >= 0 else -0.5
-        ax_coeffs.text(idx, val + offset, str(val), ha="center", va="bottom" if val >= 0 else "top",
-                       fontsize=8, fontweight="bold", color="#0f172a")
+        y_val = float(val)
+        offset = (0.03 * float_max_abs) if y_val >= 0 else (-0.03 * float_max_abs)
+        if max_abs >= 1000000 or len(str(val)) > 8:
+            lbl = f"{val:.2e}"
+        else:
+            lbl = str(val)
+        ax_coeffs.text(idx, y_val + offset, lbl, ha="center", va="bottom" if y_val >= 0 else "top",
+                       fontsize=7.0 if len(coeffs) > 10 else 8.0, fontweight="bold", color="#0f172a")
 
     # Subplot 2: Underlying Pascal Row C(n, k)
     k_range = list(range(n + 1))
-    pascal_vals = [combinatorics.combinations(n, k) for k in k_range]
+    pascal_vals = [float(combinatorics.combinations(n, k)) for k in k_range]
 
     ax_pascal.bar([str(k) for k in k_range], pascal_vals, color=CLR_COMB, width=0.6, edgecolor="#0f172a", linewidth=0.5)
     ax_pascal.set_xlabel("Binomial Index k", fontsize=10, fontweight="bold")
@@ -1071,6 +1093,133 @@ def plot_binomial_expansion(n, a, b, as_bytes=False):
     fig.subplots_adjust(bottom=0.10)
 
     return save_or_return_figure(fig, "plot_12_expansion", as_bytes=as_bytes)
+
+
+def plot_derangements(n, as_bytes=False):
+    """Visualizes derangements D(n) and the asymptotic convergence to n! / e.
+    
+    Subplot 1: Compares D(k) vs k! on a log10 scale across k = 0..n.
+    Subplot 2: Shows the ratio D(k) / k! rapidly approaching the horizontal limit line 1/e (~0.367879).
+    """
+    if not is_matplotlib_available():
+        return None
+    if not is_strict_int(n):
+        raise TypeError("n must be an integer.")
+    if n < 0 or n > 1000:
+        raise ValueError("Requires 0 <= n <= 1000.")
+
+    target_d = combinatorics.derangements(n)
+    target_f = combinatorics.factorial(n)
+    ratio = float(target_d) / float(target_f) if target_f > 0 else 1.0
+
+    with PLOT_LOCK:
+        fig, (ax_growth, ax_ratio) = plt.subplots(1, 2, figsize=(11.0, 5.2), gridspec_kw={"width_ratios": [1.2, 1.0]})
+
+        # Subplot 1: Growth of D(k) vs k!
+        max_k = min(n, 20)
+        k_range = list(range(max_k + 1)) if n <= 25 else [k for k in range(0, n + 1, max(1, n // 20))]
+        if n not in k_range:
+            k_range.append(n)
+            k_range.sort()
+
+        d_logs = [safe_log10(combinatorics.derangements(k)) for k in k_range]
+        f_logs = [safe_log10(combinatorics.factorial(k)) for k in k_range]
+
+        x_indices = list(range(len(k_range)))
+        bar_w = 0.38
+        x_d = [x - bar_w / 2 for x in x_indices]
+        x_f = [x + bar_w / 2 for x in x_indices]
+
+        ax_growth.bar(x_f, f_logs, width=bar_w, label="All Permutations k!", color=CLR_NEUTRAL, edgecolor="#0f172a", linewidth=0.5)
+        ax_growth.bar(x_d, d_logs, width=bar_w, label="Derangements D(k)", color=CLR_HIGHLIGHT, edgecolor="#0f172a", linewidth=0.5)
+        ax_growth.set_xticks(x_indices)
+        ax_growth.set_xticklabels([str(k) for k in k_range])
+        ax_growth.set_xlabel("Input Size k", fontsize=10, fontweight="bold")
+        ax_growth.set_ylabel("log10( Count )", fontsize=10, fontweight="bold")
+        ax_growth.set_title(f"Derangements D(k) vs Total Permutations k! (Chosen n={n})", fontsize=11, fontweight="bold")
+        ax_growth.legend(loc="upper left", fontsize=8.5)
+        ax_growth.grid(axis="y", linestyle="--", alpha=0.5)
+
+        # Subplot 2: Ratio Convergence to 1/e
+        ratio_k = list(range(1, min(max(n, 7), 15) + 1))
+        ratios = [float(combinatorics.derangements(k)) / float(combinatorics.factorial(k)) for k in ratio_k]
+        inv_e = 1.0 / math.e
+
+        ax_ratio.plot(ratio_k, ratios, marker="o", color=CLR_PERM, lw=2.0, label="D(k) / k!")
+        ax_ratio.axhline(inv_e, color=CLR_NEGATIVE, linestyle="--", lw=1.8, label=f"Limit 1/e ≈ {inv_e:.4f}")
+        ax_ratio.set_xlabel("Size k", fontsize=10, fontweight="bold")
+        ax_ratio.set_ylabel("Proportion D(k) / k!", fontsize=10, fontweight="bold")
+        ax_ratio.set_title(f"Convergence to 1/e (At n={n}: {ratio:.5f})", fontsize=11, fontweight="bold")
+        ax_ratio.set_ylim(0.0, 0.6)
+        ax_ratio.legend(loc="upper right", fontsize=8.5)
+        ax_ratio.grid(True, linestyle="--", alpha=0.5)
+
+        caption = "What you are looking at: Derangements count permutations with zero fixed points; asymptotically ~36.8% (1/e) of all permutations are derangements."
+        add_caption(fig, caption)
+        fig.tight_layout()
+        fig.subplots_adjust(bottom=0.09)
+
+        return save_or_return_figure(fig, "plot_derangements", as_bytes=as_bytes)
+
+
+def plot_circular_permutations(n, r=None, allow_reflections=False, as_bytes=False):
+    """Visualizes circular permutations and rotational equivalence.
+    
+    Draws items arranged along a circle and illustrates how rotational shifts
+    collapse into a single circular ordering.
+    """
+    if not is_matplotlib_available():
+        return None
+    if not is_strict_int(n):
+        raise TypeError("n must be an integer.")
+    if n < 0 or n > 1000:
+        raise ValueError("Requires 0 <= n <= 1000.")
+    if not isinstance(allow_reflections, bool):
+        raise TypeError("allow_reflections must be a boolean.")
+
+    target_r = n if (r is None) else r
+    if not is_strict_int(target_r) or target_r < 0 or target_r > n:
+        raise ValueError("Requires 0 <= r <= n.")
+
+    count = combinatorics.circular_permutations(n, r=r, allow_reflections=allow_reflections)
+
+    with PLOT_LOCK:
+        fig, ax = plt.subplots(figsize=(8.5, 6.0))
+        ax.axis("off")
+
+        if target_r == 0 or n == 0:
+            ax.set_title(f"Circular Permutations: Edge Case (n={n}, r={target_r})", fontsize=11, fontweight="bold", pad=12)
+            ax.text(0.5, 0.5, f"n = {n}, r = {target_r}: Exactly 1 empty circular arrangement [Result = 1]",
+                    ha="center", va="center", fontsize=11, fontweight="bold",
+                    bbox=dict(boxstyle="round,pad=0.6", facecolor="#eff6ff", edgecolor=CLR_PERM))
+        else:
+            disp_k = min(target_r, 8)
+            alphabet = "ABCDEFGH"
+            symbols = list(alphabet[:disp_k])
+
+            # Draw central circle
+            circ = patches.Circle((0.5, 0.5), 0.32, fill=False, edgecolor="#64748b", lw=2.0, linestyle="--")
+            ax.add_patch(circ)
+
+            # Place items along perimeter
+            for idx in range(disp_k):
+                angle = (2 * math.pi * idx) / disp_k + (math.pi / 2)
+                cx = 0.5 + 0.32 * math.cos(angle)
+                cy = 0.5 + 0.32 * math.sin(angle)
+                node = patches.Circle((cx, cy), 0.045, facecolor="#eff6ff", edgecolor=CLR_PERM, lw=1.5, zorder=5)
+                ax.add_patch(node)
+                ax.text(cx, cy, symbols[idx], ha="center", va="center", fontsize=10, fontweight="bold", color="#0f172a", zorder=6)
+
+            ax.text(0.5, 0.54, f"Circular: P_circ = {count}", ha="center", va="center", fontsize=11, fontweight="bold", color="#1e3a8a")
+            ax.text(0.5, 0.44, f"Divided by {target_r} rotations", ha="center", va="center", fontsize=9, color="#475569")
+            ax.set_title(f"Circular Permutations P_circ({n}, {target_r}) = {count}", fontsize=11, fontweight="bold", pad=10)
+
+        caption = f"What you are looking at: In a circle, rotating items by 1..{target_r} positions yields the identical cycle; dividing by {target_r} cancels rotational duplicates."
+        add_caption(fig, caption)
+        fig.tight_layout()
+        fig.subplots_adjust(bottom=0.09)
+
+        return save_or_return_figure(fig, "plot_circular", as_bytes=as_bytes)
 
 
 def generate_all_demo_plots():
@@ -1131,6 +1280,14 @@ def generate_all_demo_plots():
     p12 = plot_binomial_expansion(5, 1, 1)
     if p12:
         created.append(("12. Binomial Expansion ((x+y)^5)", p12))
+
+    p13 = plot_derangements(5)
+    if p13:
+        created.append(("13. Derangements D(5)", p13))
+
+    p14 = plot_circular_permutations(5, 3)
+    if p14:
+        created.append(("14. Circular Permutations P_circ(5, 3)", p14))
 
     return created
 

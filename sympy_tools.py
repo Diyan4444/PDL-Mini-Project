@@ -184,3 +184,69 @@ def sympy_closed_form_recurrence(rec_type, order_k, coefficients, initial_values
         return (True, closed_form_str, term_check_results, note)
     except Exception as e:
         return (False, "", [], "SymPy rsolve execution error: " + str(e))
+
+
+def run_all_symbolic_checks():
+    """Runs a complete suite of formal symbolic verifications using SymPy.
+    
+    Returns a structured dictionary suitable for both CLI output and JSON API responses.
+    """
+    if not SYMPY_AVAILABLE:
+        return {
+            "available": False,
+            "version": "Not installed",
+            "message": get_install_instructions(),
+            "results": []
+        }
+
+    import combinatorics
+    import recurrence
+
+    checks = []
+
+    # 1. Factorial check
+    fact_10 = combinatorics.factorial(10)
+    ok_f, sym_f, note_f = sympy_verify_factorial(10, fact_10)
+    checks.append({
+        "name": "Factorial (10!)",
+        "verified": ok_f,
+        "detail": note_f,
+        "expression": "10! = 3,628,800"
+    })
+
+    # 2. Combinations check
+    c_10_4 = combinatorics.combinations(10, 4)
+    ok_c, sym_c, note_c = sympy_verify_combination(10, 4, c_10_4)
+    checks.append({
+        "name": "Binomial Coefficient C(10, 4)",
+        "verified": ok_c,
+        "detail": note_c,
+        "expression": "C(10, 4) = 210"
+    })
+
+    # 3. Binomial Expansion check
+    exp_terms = combinatorics.binomial_expansion_terms(3, 2, -3)
+    ok_e, sym_e, note_e = sympy_verify_expansion(3, 2, -3, exp_terms)
+    checks.append({
+        "name": "Binomial Expansion of (2x - 3y)^3",
+        "verified": ok_e,
+        "detail": note_e,
+        "expression": sym_e
+    })
+
+    # 4. Fibonacci Recurrence rsolve check
+    fib_terms = recurrence.fibonacci_sequence(10)
+    ok_r, closed_form, term_checks, note_r = sympy_closed_form_recurrence("fibonacci", 2, [1, 1], (0, 1), fib_terms)
+    checks.append({
+        "name": "Fibonacci Closed Form via rsolve() (Binet's Formula)",
+        "verified": ok_r,
+        "detail": note_r,
+        "expression": "F(n) = " + closed_form
+    })
+
+    return {
+        "available": True,
+        "version": SYMPY_VERSION,
+        "message": f"SymPy {SYMPY_VERSION} formal symbolic verification active.",
+        "results": checks
+    }

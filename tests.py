@@ -192,7 +192,30 @@ def test_invalid_input_rejection():
     except ValueError:
         pass
     
-    return "Input validation and error rejection (negatives, r > n, invalid orders)"
+    # Boolean rejection checks
+    for bad_val in (True, False):
+        try:
+            combinatorics.factorial(bad_val)
+            assert False, "Boolean factorial should raise TypeError"
+        except TypeError:
+            pass
+        try:
+            combinatorics.permutations(bad_val, 0)
+            assert False, "Boolean permutations should raise TypeError"
+        except TypeError:
+            pass
+        try:
+            combinatorics.combinations(5, bad_val)
+            assert False, "Boolean combinations should raise TypeError"
+        except TypeError:
+            pass
+        try:
+            recurrence.fibonacci_sequence(bad_val)
+            assert False, "Boolean fibonacci should raise TypeError"
+        except TypeError:
+            pass
+    
+    return "Input validation and error rejection (negatives, r > n, invalid orders, booleans rejected)"
 
 
 def test_history_persistence():
@@ -285,7 +308,12 @@ def test_visualizer_big_numbers():
     p_perm = visualizer.plot_permutations(500, 250)
     assert p_perm is not None
     assert os.path.exists(p_perm)
-    return "Visualizer big-integer safety (safe_log10 handles 500! without float overflow)"
+
+    # (10x + 10y)^20 has coefficients exceeding 1.8e25 (prevents OverflowError int too big to convert)
+    p_exp = visualizer.plot_binomial_expansion(20, 10, 10, as_bytes=True)
+    assert p_exp is not None
+    assert p_exp.startswith(b"\x89PNG\r\n\x1a\n")
+    return "Visualizer big-integer safety (safe_log10 handles 500! and huge expansion coefficients without overflow)"
 
 
 def test_visualizer_edge_cases():
@@ -494,6 +522,216 @@ def test_server_binds_localhost_only():
     return "Server localhost binding (127.0.0.1 only, prevents public exposure)"
 
 
+
+def test_derangements_math_and_pie():
+    """Validates Derangements D(n), recurrence, and Principle of Inclusion-Exclusion."""
+    # Known values: D(0)=1, D(1)=0, D(2)=1, D(3)=2, D(4)=9, D(5)=44, D(6)=265
+    expected = [1, 0, 1, 2, 9, 44, 265]
+    for n, exp_val in enumerate(expected):
+        assert combinatorics.derangements(n) == exp_val, f"D({n}) expected {exp_val}, got {combinatorics.derangements(n)}"
+        assert combinatorics.derangements_inclusion_exclusion(n) == exp_val, f"PIE D({n}) mismatch"
+    
+    # Recurrence sequence test
+    seq = recurrence.derangements_sequence(7)
+    assert seq == expected, f"Derangements sequence mismatch: {seq}"
+    
+    # Recurrence relation: D(n) = (n - 1) * (D(n - 1) + D(n - 2)) for n in 2..10
+    for n in range(2, 11):
+        dn = combinatorics.derangements(n)
+        dn1 = combinatorics.derangements(n - 1)
+        dn2 = combinatorics.derangements(n - 2)
+        assert dn == (n - 1) * (dn1 + dn2), f"Recurrence failed at n={n}"
+        
+    # Asymptotic ratio D(n) / n! approaches 1/e
+    rep = combinatorics.derangements_report(10)
+    assert abs(rep["ratio"] - rep["ratio_approx_1_over_e"]) < 1e-6
+    
+    # Validation errors
+    try:
+        combinatorics.derangements(-1)
+        assert False, "Expected ValueError for negative n"
+    except ValueError:
+        pass
+    try:
+        combinatorics.derangements(True)
+        assert False, "Expected TypeError for bool n"
+    except TypeError:
+        pass
+        
+    return "Derangements D(n), PIE equivalence, and asymptotic limit 1/e"
+
+
+def test_circular_permutations_math():
+    """Validates circular permutations with rotational and reflective symmetries."""
+    # Full circle: (n - 1)!
+    assert combinatorics.circular_permutations(1, 1) == 1
+    assert combinatorics.circular_permutations(4, 4) == 6    # (4 - 1)! = 6
+    assert combinatorics.circular_permutations(5, 5) == 24   # (5 - 1)! = 24
+    
+    # Subset circle: P(n, r) / r
+    assert combinatorics.circular_permutations(5, 3) == 20   # P(5, 3) / 3 = 60 / 3 = 20
+    assert combinatorics.circular_permutations(6, 4) == 90   # P(6, 4) / 4 = 360 / 4 = 90
+    
+    # Reflective equivalence (necklaces / bracelets): divide by 2
+    assert combinatorics.circular_permutations(5, 5, allow_reflections=True) == 12  # 24 / 2 = 12
+    assert combinatorics.circular_permutations(5, 3, allow_reflections=True) == 10  # 20 / 2 = 10
+    assert combinatorics.circular_permutations(1, 1, allow_reflections=True) == 1
+    assert combinatorics.circular_permutations(2, 2, allow_reflections=True) == 1
+    
+    # Validation errors
+    try:
+        combinatorics.circular_permutations(-1, 0)
+        assert False, "Expected ValueError for negative n"
+    except ValueError:
+        pass
+    try:
+        combinatorics.circular_permutations(3, 5)
+        assert False, "Expected ValueError for r > n"
+    except ValueError:
+        pass
+    try:
+        combinatorics.circular_permutations(5, True)
+        assert False, "Expected TypeError for boolean r"
+    except TypeError:
+        pass
+        
+    return "Circular permutations (rotational equivalence P(n,r)/r and reflective necklace variants)"
+
+
+def test_multinomial_coefficient():
+    """Validates explicitly named multinomial coefficient M(n; k1, ..., km)."""
+    # MISSISSIPPI: M(11; 1, 4, 4, 2) = 34650
+    assert combinatorics.multinomial_coefficient([1, 4, 4, 2]) == 34650
+    
+    # AAB: M(3; 2, 1) = 3
+    assert combinatorics.multinomial_coefficient([2, 1]) == 3
+    
+    # Single group: M(k; k) = 1
+    assert combinatorics.multinomial_coefficient([5]) == 1
+    
+    # Validation
+    try:
+        combinatorics.multinomial_coefficient([])
+        assert False, "Expected ValueError for empty counts"
+    except ValueError:
+        pass
+    try:
+        combinatorics.multinomial_coefficient([3, -1])
+        assert False, "Expected ValueError for negative count"
+    except ValueError:
+        pass
+    try:
+        combinatorics.multinomial_coefficient([2, False])
+        assert False, "Expected TypeError for boolean count"
+    except TypeError:
+        pass
+        
+    return "Multinomial coefficient M(n; k1, ..., km) (MISSISSIPPI=34650, AAB=3)"
+
+
+def test_api_calc_endpoints():
+    """Validates /api/calc JSON endpoint across operations and boundary inputs."""
+    import json
+    server, port = start_test_server()
+    try:
+        base = f"http://127.0.0.1:{port}"
+        
+        # Factorial
+        res = urllib.request.urlopen(f"{base}/api/calc?op=factorial&n=5")
+        data = json.loads(res.read().decode("utf-8"))
+        assert data["success"] is True
+        assert data["result"] == "120"
+        assert data["engine"] == "python"
+        
+        # Permutations
+        res = urllib.request.urlopen(f"{base}/api/calc?op=permutations&n=5&r=3")
+        data = json.loads(res.read().decode("utf-8"))
+        assert data["result"] == "60"
+        
+        # Combinations
+        res = urllib.request.urlopen(f"{base}/api/calc?op=combinations&n=5&r=3")
+        data = json.loads(res.read().decode("utf-8"))
+        assert data["result"] == "10"
+        
+        # Derangements
+        res = urllib.request.urlopen(f"{base}/api/calc?op=derangements&n=5")
+        data = json.loads(res.read().decode("utf-8"))
+        assert data["result"] == "44"
+        assert "ratio" in data
+        
+        # Circular
+        res = urllib.request.urlopen(f"{base}/api/calc?op=circular&n=5&r=3&reflections=1")
+        data = json.loads(res.read().decode("utf-8"))
+        assert data["result"] == "10"
+        
+        # Error rejection: negative n -> HTTP 400
+        try:
+            urllib.request.urlopen(f"{base}/api/calc?op=factorial&n=-5")
+            assert False, "Expected HTTP 400 for n=-5"
+        except urllib.error.HTTPError as e:
+            assert e.code == 400
+            err_data = json.loads(e.read().decode("utf-8"))
+            assert err_data["success"] is False
+            
+    finally:
+        server.shutdown()
+        server.server_close()
+        
+    return "/api/calc JSON backend calculation engine (all operations & error handling)"
+
+
+def test_api_history_and_sympy():
+    """Validates /api/history (GET, POST, DELETE) and /api/sympy endpoints."""
+    import json
+    server, port = start_test_server()
+    try:
+        base = f"http://127.0.0.1:{port}"
+        
+        # Sympy endpoint
+        res = urllib.request.urlopen(f"{base}/api/sympy")
+        data = json.loads(res.read().decode("utf-8"))
+        assert data["success"] is True
+        assert "available" in data["sympy"]
+        assert "version" in data["sympy"]
+        
+        # History GET
+        res = urllib.request.urlopen(f"{base}/api/history")
+        data = json.loads(res.read().decode("utf-8"))
+        assert "history" in data
+        
+        # History POST
+        post_body = json.dumps({"operation": "TestOp", "parameters": "k=1", "result": "99"}).encode("utf-8")
+        req = urllib.request.Request(f"{base}/api/history", data=post_body, headers={"Content-Type": "application/json"}, method="POST")
+        res = urllib.request.urlopen(req)
+        post_data = json.loads(res.read().decode("utf-8"))
+        assert post_data["success"] is True
+        
+        # History DELETE
+        req_del = urllib.request.Request(f"{base}/api/history", method="DELETE")
+        res_del = urllib.request.urlopen(req_del)
+        del_data = json.loads(res_del.read().decode("utf-8"))
+        assert del_data["success"] is True
+        
+    finally:
+        server.shutdown()
+        server.server_close()
+        
+    return "/api/history and /api/sympy REST API endpoints"
+
+
+def test_visualizer_derangements_and_circular():
+    """Validates matplotlib plot generation for Derangements and Circular Permutations."""
+    png_d = visualizer.plot_derangements(5, as_bytes=True)
+    assert png_d is not None and png_d.startswith(b"\x89PNG\r\n\x1a\n")
+    assert len(png_d) > 1000
+    
+    png_c = visualizer.plot_circular_permutations(5, 3, allow_reflections=True, as_bytes=True)
+    assert png_c is not None and png_c.startswith(b"\x89PNG\r\n\x1a\n")
+    assert len(png_c) > 1000
+    
+    return "Visualizer Derangements and Circular Permutations chart generation"
+
+
 def run_all_tests():
     """Executes all test functions and returns a summary dictionary."""
     test_functions = [
@@ -518,7 +756,13 @@ def run_all_tests():
         test_plot_endpoint_dynamic_inputs,
         test_plot_endpoint_bad_input,
         test_server_serves_only_allowed_paths,
-        test_server_binds_localhost_only
+        test_server_binds_localhost_only,
+        test_derangements_math_and_pie,
+        test_circular_permutations_math,
+        test_multinomial_coefficient,
+        test_api_calc_endpoints,
+        test_api_history_and_sympy,
+        test_visualizer_derangements_and_circular
     ]
     
     passed_count = 0

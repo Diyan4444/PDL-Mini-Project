@@ -2,6 +2,11 @@
 # Name: [YOUR NAME]  Roll No: [YOUR ROLL NO]
 # Module: recurrence.py - Numerical generation of recurrence sequences
 
+def is_strict_int(val):
+    """Validates that a value is an integer and strictly not a boolean."""
+    return isinstance(val, int) and not isinstance(val, bool)
+
+
 def fibonacci_sequence(num_terms):
     """Generates the first num_terms of the Fibonacci sequence.
     
@@ -9,7 +14,7 @@ def fibonacci_sequence(num_terms):
     Valid terms range: 1 <= num_terms <= 50.
     Returns a list of integer terms.
     """
-    if not isinstance(num_terms, int):
+    if not is_strict_int(num_terms):
         raise TypeError("num_terms must be an integer.")
     if num_terms < 1 or num_terms > 50:
         raise ValueError("num_terms must be between 1 and 50.")
@@ -32,7 +37,7 @@ def factorial_recurrence(num_terms):
     Valid terms range: 1 <= num_terms <= 50.
     Returns a list of integer terms corresponding to a(0), a(1), ..., a(num_terms - 1).
     """
-    if not isinstance(num_terms, int):
+    if not is_strict_int(num_terms):
         raise TypeError("num_terms must be an integer.")
     if num_terms < 1 or num_terms > 50:
         raise ValueError("num_terms must be between 1 and 50.")
@@ -45,6 +50,21 @@ def factorial_recurrence(num_terms):
     return sequence
 
 
+def pascal_next_row(prev_row):
+    """Generates the next row of Pascal's triangle from prev_row via additive recurrence.
+    
+    Consolidates the single source of truth for the additive rule:
+    new_row[k] = prev_row[k - 1] + prev_row[k] with 1 at both ends.
+    """
+    if not prev_row:
+        return [1]
+    new_row = [1]
+    for k in range(1, len(prev_row)):
+        new_row.append(prev_row[k - 1] + prev_row[k])
+    new_row.append(1)
+    return new_row
+
+
 def pascal_recurrence_row(n):
     """Computes row n of Pascal's triangle using the additive recurrence relation.
     
@@ -52,23 +72,15 @@ def pascal_recurrence_row(n):
     Boundary conditions: C(n, 0) = 1, C(n, n) = 1
     Returns row n as a list of integers.
     """
-    if not isinstance(n, int):
+    if not is_strict_int(n):
         raise TypeError("Row index n must be an integer.")
     if n < 0 or n > 20:
         raise ValueError("Row index n must be between 0 and 20.")
     
-    if n == 0:
-        return [1]
-    
-    prev_row = [1]
-    for current_n in range(1, n + 1):
-        new_row = [1]
-        for k in range(1, current_n):
-            new_row.append(prev_row[k - 1] + prev_row[k])
-        new_row.append(1)
-        prev_row = new_row
-    
-    return prev_row
+    row = [1]
+    for _ in range(n):
+        row = pascal_next_row(row)
+    return row
 
 
 def custom_linear_recurrence(order_k, coefficients, initial_values, num_terms):
@@ -86,7 +98,7 @@ def custom_linear_recurrence(order_k, coefficients, initial_values, num_terms):
     Returns a list of integers representing a(0), a(1), ..., a(num_terms - 1).
     Note: Numerical term generation is separate from symbolic closed-form solving.
     """
-    if not isinstance(order_k, int):
+    if not is_strict_int(order_k):
         raise TypeError("order_k must be an integer.")
     if order_k < 1 or order_k > 5:
         raise ValueError("Order k must be between 1 and 5.")
@@ -97,7 +109,7 @@ def custom_linear_recurrence(order_k, coefficients, initial_values, num_terms):
         raise ValueError("Exactly " + str(order_k) + " coefficients are required for order " + str(order_k) + ".")
     
     for c in coefficients:
-        if not isinstance(c, int):
+        if not is_strict_int(c):
             raise TypeError("All coefficients must be integers.")
         if abs(c) > 1000:
             raise ValueError("Coefficients must satisfy |c| <= 1000.")
@@ -111,12 +123,12 @@ def custom_linear_recurrence(order_k, coefficients, initial_values, num_terms):
         raise ValueError("Exactly " + str(order_k) + " initial values are required for order " + str(order_k) + ".")
     
     for val in initial_values:
-        if not isinstance(val, int):
+        if not is_strict_int(val):
             raise TypeError("All initial values must be integers.")
         if abs(val) > 1000:
             raise ValueError("Initial values must satisfy |val| <= 1000.")
     
-    if not isinstance(num_terms, int):
+    if not is_strict_int(num_terms):
         raise TypeError("num_terms must be an integer.")
     if num_terms < 1 or num_terms > 50:
         raise ValueError("num_terms must be between 1 and 50.")
@@ -135,3 +147,25 @@ def custom_linear_recurrence(order_k, coefficients, initial_values, num_terms):
         sequence.append(next_val)
     
     return sequence
+
+
+def derangements_sequence(num_terms):
+    """Generates terms of the derangements sequence D(0), D(1), ..., D(num_terms - 1).
+    
+    Recurrence: D(0) = 1, D(1) = 0, D(n) = (n - 1) * (D(n - 1) + D(n - 2)).
+    Valid terms range: 1 <= num_terms <= 50.
+    """
+    if not is_strict_int(num_terms):
+        raise TypeError("num_terms must be an integer.")
+    if num_terms < 1 or num_terms > 50:
+        raise ValueError("num_terms must be between 1 and 50.")
+    
+    if num_terms == 1:
+        return [1]
+    
+    seq = [1, 0]
+    for n in range(2, num_terms):
+        next_d = (n - 1) * (seq[n - 1] + seq[n - 2])
+        seq.append(next_d)
+    
+    return seq[:num_terms]

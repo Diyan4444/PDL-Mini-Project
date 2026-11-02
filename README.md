@@ -1,14 +1,14 @@
 # 🎲 Combinatorial Counting & Permutation Analyzer
 
-A smart, interactive math exploration and visualization tool designed for college students and peer reviewers. It computes and demonstrates **Permutations, Combinations, Anagrams (Multisets), Pascal's Triangle, Recurrence Relations, and Binomial Expansions** with step-by-step arithmetic. Every one of operations 1 to 12 now dynamically generates a Matplotlib "Visual Explanation" chart directly beneath the result, helping students see *why* the mathematical formulas work.
+A comprehensive, mathematically rigorous, and visual discrete mathematics exploration tool designed for college students, examiners, and peer reviewers. It computes and visualizes **Permutations, Combinations, Repetition Variants, Multisets, Binomial Identities, Pascal's Triangle, Recurrence Relations, Binomial Expansions, Derangements (Subfactorials), and Circular Permutations**. Powered by pure Python arbitrary-precision arithmetic, every operation dynamically renders a Matplotlib visual explanation chart directly under the result to demonstrate *why* the mathematical formulas work.
 
 ---
 
 ## ⚡ Three Ways to Use It
 
-- **Web App with Live Charts (Recommended):** Run `python web_viewer.py` → open http://127.0.0.1:8000
-- **Terminal CLI:** Run `python main.py` (interactive menu with options 0 to 16)
-- **Standalone Browser File:** Double-click `index.html` (calculators work offline; Python charts do not appear)
+- **Web App with Live Engine & Charts (Recommended):** Run `python web_viewer.py` → open http://127.0.0.1:8000
+- **Interactive Terminal CLI:** Run `python main.py` (menu options 0 to 18)
+- **Direct Browser File:** Double-click `index.html` (runs full calculations offline via client-side BigInt engine; charts gracefully instruct to start the Python server)
 
 ---
 
@@ -17,23 +17,25 @@ A smart, interactive math exploration and visualization tool designed for colleg
 Have you ever wondered:
 - *In how many ways can 5 runners finish in 1st, 2nd, and 3rd place?* → **Permutations P(n, r)**
 - *How many different 3-person project teams can you pick from 10 classmates?* → **Combinations C(n, r)**
-- *Why does order matter when picking a passcode, but not when picking lottery numbers?* → **P vs C Comparison**
-- *How many unique words can you make by rearranging the letters in "MISSISSIPPI"?* → **Multisets**
-- *What pattern connects Pascal's triangle to (x + y)^n algebra?* → **Binomial Expansion**
+- *Why does order matter for passcodes, but not for lottery numbers?* → **P vs C Comparison**
+- *How many unique words can you make by rearranging "MISSISSIPPI"?* → **Multisets & Multinomials**
+- *In how many secret-Santa drawings does NO ONE receive their own gift?* → **Derangements D(n)**
+- *How many unique arrangements exist when seating people or beading reversible necklaces?* → **Circular Permutations**
+- *What pattern connects Pascal's triangle to algebraic expansion?* → **Binomial Theorem**
 
-This project answers these questions using exact Python integer arithmetic (zero decimal rounding error) and pairs every calculation with a clear, visual explanation.
+This project answers these questions using exact Python integer arithmetic (zero decimal rounding error) and pairs every calculation with an educational visual explanation.
 
 ---
 
 ## 🔍 Why Not Just Google the Answer?
 
-Search engines and calculators give a final number, but they do not show the mathematical reasoning behind it. This tool displays the full step-by-step working and generates a synchronized chart showing slot choices, combination collapse, stars-and-bars partitions, and Pascal triangle structures.
+Search engines and simple calculators only output a final number without revealing the underlying mathematical structure. This tool shows step-by-step substitutions, algebraic identities, asymptotic limits (such as D(n)/n! → 1/e), and generates synchronized plots illustrating slot choices, subset collapses, stars-and-bars partitions, and rotational symmetry orbits.
 
 ---
 
 ## 📦 Installation & Setup
 
-**Prerequisite:** Python 3.8+ (`python --version`, or `python3` / `py` on some systems).
+**Prerequisite:** Python 3.8+ (`python --version` or `python3` / `py`).
 
 ### Step 1: Clone the Repository
 ```bash
@@ -57,9 +59,9 @@ cd PDL-Mini-Project
 ```bash
 pip install -r requirements.txt
 ```
-- `matplotlib`: Generates the 12 dynamic visual explanation charts.
-- `sympy`: Optional dependency used only for formal symbolic verification (Option 13).
-- *Core mathematics and the web server use only the Python standard library.*
+- `matplotlib`: Generates all 14 dynamic visual explanation charts.
+- `sympy`: Optional dependency for formal symbolic verification and recurrence closed-form solvers (`rsolve`).
+- *Core mathematical engines, HTTP server, and history management use only the Python standard library.*
 
 ---
 
@@ -77,82 +79,84 @@ Open http://127.0.0.1:8000 in your browser. Press Ctrl+C to stop.
 ======================================================================
 ```
 1. Open **http://127.0.0.1:8000** in Google Chrome or any browser.
-2. **Try it:** Open **Factorial**, enter `720`, and click **Calculate**. The exact 1,747-digit result appears alongside a logarithmic growth chart. Change the input to `4`, then `5` — the chart updates live for each calculation.
-3. **Stop server:** Press `Ctrl + C` in the terminal to stop cleanly.
-4. **Port in use:** Run `python web_viewer.py 8001` and open http://127.0.0.1:8001.
+2. The UI connects directly to Python's `/api/calc` backend, badged with `[Python Engine]`.
+3. Try entering `5` in **Derangements** — you get exact `D(5) = 44`, ratio `44/120 = 0.3667`, comparison to limit `1/e ≈ 0.3679`, and an inclusion-exclusion partition chart!
+4. **Port in use:** Run `python web_viewer.py 8001` and navigate to http://127.0.0.1:8001.
 
-> **Note:** The server listens only on `127.0.0.1` (your local computer, never exposed to external networks). You must open `http://127.0.0.1:8000` in the browser; double-clicking `index.html` runs offline calculations without live charts.
+> **Security Note:** The server binds strictly to `127.0.0.1` (localhost only) and whitelists accessible paths to prevent directory traversal and public network exposure.
 
 ---
 
 ## 💻 Terminal CLI (python main.py)
 
-Run the full interactive command-line interface:
+Run the interactive terminal interface:
 ```bash
 python main.py
 ```
-- Features a clean numeric menu (options 1 to 16, and `0` to exit).
-- After running any of operations 1 to 12, enter `1` at the visual prompt to view the generated chart.
-- **Option 16:** Batch-generates all 12 demo explanation charts into the `plots/` folder (git-ignored).
-- Operations 13 to 15 (SymPy verification, history log, and self-test) run purely in text mode without charts.
+- Clean numeric menu with options 1 to 18 (`0` to exit).
+- Prompts after each calculation to generate and view visual explanation charts.
+- **Option 18 (Visual Gallery):** Batch-generates all 14 demonstration charts into the `plots/` folder.
+- Non-visual tools (SymPy verification, history search/clear, automated self-tests) run in clean text mode.
 
 ---
 
 ## 🧪 Run the Automated Tests
 
-Verify mathematical accuracy, input validation, and server endpoints:
+Execute the comprehensive automated test suite:
 ```bash
 python tests.py
 ```
-**Test Result:** All **22/22 tests passed** (0 failed).  
-The suite validates known mathematical answers, repetition variants, multiset arrangements, identities, Pascal construction, recurrence sequences, error rejection, history persistence, SymPy integration, and dynamic HTTP `/plot/` endpoints. Visualizer file-creation tests skip cleanly if Matplotlib is absent.
+**Test Result:** All **28/28 tests passed** (0 failed).  
+The suite validates known mathematical answers, boundary conditions (n=0, 0!=1), boolean type safety rejection, large integer expansion scaling, multiset partitions, recurrence sequences, history persistence, SymPy integration, REST endpoints (`/api/calc`, `/api/history`, `/api/sympy`), security whitelists, and all 14 visualizer chart routines.
 
 ---
 
-## 📊 Key Features Table
+## 📊 Key Features & Mathematics Table
 
-| # | Feature | What It Does | Visual Explanation |
+| # | Feature | Mathematical Formula | Visual Explanation |
 |---|---|---|---|
-| **1** | Factorial n! | Exact integer product down to 1 | Log10 growth curve and multiplication chain strip |
-| **2** | Permutations P(n, r) | Ordered arrangements (order matters) | Shrinking choice slots diagram and distribution curve |
-| **3** | Combinations C(n, r) | Unordered selections (order does not matter) | Symmetric bell curve and r! subset arrangement collapse |
-| **4** | P vs C Comparison | Proves that P(n, r) = C(n, r) * r! | Side-by-side grouped bars comparing ordered vs unordered |
-| **5** | Permutations with Repetition | Sequence counting with replacement (n^r) | Constant choice slots vs shrinking permutation slots |
-| **6** | Combinations with Repetition | Multichoose selections C(n+r-1, r) | Stars-and-bars divider model with item buckets |
-| **7** | Multiset Arrangements | Anagram counting with repeated letters | Letter frequency histogram and duplicate factorial divisions |
-| **8** | List Small Arrangements | Generates actual tuples and verifies uniqueness | Arrangement badge grid with uniqueness verification card |
-| **9** | Binomial Identities | Proves symmetry, Pascal's rule, and sum = 2^n | Three panels: symmetry, Pascal addition, and row sum |
-| **10** | Pascal's Triangle | Centered arithmetic triangle row by row | Number pyramid with odd/even Sierpinski parity colouring |
-| **11** | Recurrence Relations | Solves Fibonacci, factorial, and custom recurrences | Step progression and Golden Ratio (phi ≈ 1.618) convergence |
-| **12** | Binomial Expansion | Expands (a*x + b*y)^n into clean algebraic text | Signed polynomial coefficients and underlying Pascal row |
-| **13** | SymPy Verification | Formal algebraic cross-check and rsolve | None |
-| **14** | Calculation History | Audit log with search and timestamp persistence | None |
-| **15** | Automated Self-Test | Automated verification suite across all modules | None |
-| **16** | Visual Gallery | Batch-generates all 12 demo charts into plots/ | Generates all 12 explanation charts |
+| **1** | Factorial n! | n! = n × (n - 1) × ... × 1 (0! = 1) | Log10 growth curve and multiplication chain |
+| **2** | Permutations P(n, r) | P(n, r) = n! / (n - r)! | Shrinking choice slots and distribution curve |
+| **3** | Combinations C(n, r) | C(n, r) = n! / (r! × (n - r)!) | Symmetric bell curve and r! subset arrangement collapse |
+| **4** | P vs C Comparison | P(n, r) = C(n, r) × r! | Grouped bar chart contrasting ordered vs unordered counts |
+| **5** | Permutations w/ Repetition | n^r | Constant choice slots vs shrinking permutation slots |
+| **6** | Combinations w/ Repetition | C(n + r - 1, r) | Stars-and-bars divider model with item buckets |
+| **7** | Multiset Arrangements | n! / (k1! × k2! × ... × km!) | Letter frequency histogram and duplicate factorial divisions |
+| **8** | Listing & Uniqueness | Exhaustive tuple enumeration | Arrangement badge grid with uniqueness verification |
+| **9** | Binomial Identities | Symmetry, Pascal rule, Sum = 2^n | Three panels: symmetry, Pascal addition, and row sums |
+| **10** | Pascal's Triangle | C(n, k) = C(n-1, k-1) + C(n-1, k) | Centered number pyramid with odd/even parity colouring |
+| **11** | Recurrence Analyzer | a(n) = c1*a(n-1) + ... + ck*a(n-k) | Step progression and Golden Ratio (phi ≈ 1.618) convergence |
+| **12** | Binomial Expansion | (a*x + b*y)^n via Sum C(n, k) | Signed polynomial coefficients and Pascal row mapping |
+| **13** | Derangements D(n) | D(n) = (n - 1) * [D(n-1) + D(n-2)] | Recurrence step bars, ratio D(n)/n!, and 1/e asymptote line |
+| **14** | Circular Permutations | P(n, r) / r (Necklaces: ÷ 2) | Rotational circle perimeter layout and symmetry orbits |
+| **15** | SymPy Verification | Formal algebraic cross-check & rsolve | Interactive verification cards with live symbolics |
+| **16** | Calculation History | Persistent log in history.txt | Audit table with keyword search and clear options |
+| **17** | Automated Self-Test | Regression suite covering all modules | Live browser runner with pass/fail badges |
+| **18** | Visual Gallery | Batch chart generation (14 plots) | Generates all 14 explanation charts into plots/ |
 
 ---
 
-## 🧩 How the Pieces Fit Together
+## 🧩 Architectural Design & API Flow
 
 ```
-Browser (index.html) → GET /plot/<operation>?params → web_viewer.py validates → visualizer.py draws (matplotlib) → PNG bytes returned → shown under result
+Web Browser (index.html)
+   │
+   ├── [Primary Engine] ──> GET /api/calc?op=... ──> web_viewer.py ──> combinatorics.py / recurrence.py
+   │                                                                      │ (Exact Arbitrary BigInt)
+   ├── [Visual Explanations] ──> GET /plot/<op>?... ─> visualizer.py ───> matplotlib (PNG Bytes)
+   │
+   ├── [Formal Proofs] ───> GET /api/sympy ────────> sympy_tools.py ───> SymPy rsolve & expand
+   │
+   └── [Unified Audit] ───> GET/POST/DELETE /api/history ──> history_manager.py ──> history.txt
 ```
 
-### Dynamic Plot HTTP Endpoints
-| Endpoint | Query Parameters | Description |
-|---|---|---|
-| `/plot/factorial` | `n` (0..1000) | Factorial growth curve & multiplication chain |
-| `/plot/permutations` | `n`, `r` (0..1000, r <= n) | Permutation slots and distribution |
-| `/plot/combinations` | `n`, `r` (0..1000, r <= n) | Combination symmetry & r! collapse |
-| `/plot/comparison` | `n`, `r` (0..1000, r <= n) | Side-by-side grouped bar comparison |
-| `/plot/permrep` | `n`, `r` (0..1000) | Constant choice slots (n^r) |
-| `/plot/combrep` | `n`, `r` (0..1000) | Stars-and-bars partition diagram |
-| `/plot/multiset` | `word` (alphanumeric, max 50) | Duplicate letter frequencies & divisions |
-| `/plot/listing` | `mode` (perm/comb/multi), `n`, `r`, `word` | Arrangement tiles (n <= 8) |
-| `/plot/identities` | `n`, `r` (0..1000, r <= n) | 3-panel identity proof |
-| `/plot/pascal` | `rows` (1..15) | Number pyramid and parity colouring |
-| `/plot/recurrence` | `type` (fib/fact/custom), `terms` (1..50), `order`, `coeffs`, `inits` | Step progression and ratio convergence |
-| `/plot/expansion` | `n` (0..20), `a`, `b` (-10..10) | Polynomial coefficients & Pascal row |
+### Key API Endpoints
+- `GET /api/calc?op=<operation>&<params>`: Evaluates operations via Python backend and returns structured JSON with exact results and step explanations.
+- `GET /plot/<operation>?<params>`: Generates and streams PNG image bytes for visual explanations.
+- `GET /api/history`: Retrieves history records from `history.txt`.
+- `POST /api/history`: Appends calculation records to `history.txt`.
+- `DELETE /api/history`: Clears `history.txt`.
+- `GET /api/sympy`: Runs formal symbolic checks (rsolve, expansions, limits).
 
 ---
 
@@ -160,16 +164,16 @@ Browser (index.html) → GET /plot/<operation>?params → web_viewer.py validate
 
 ```
 PDL-Mini-Project/
-├── combinatorics.py     # Pure math functions (n!, P, C, multisets, Pascal, expansions)
-├── recurrence.py        # Sequence generators (Fibonacci, factorial, custom recurrences)
-├── visualizer.py        # Matplotlib visual explanations (12 chart generators)
-├── web_viewer.py        # Local Python HTTP server (serves index.html and /plot/ routes)
-├── main.py              # Terminal interactive CLI menu (options 0-16)
-├── tests.py             # 22 automated plain-function verification tests
-├── sympy_tools.py       # Optional symbolic formal verification
-├── history_manager.py   # Calculation logging and search engine (history.txt)
-├── index.html           # Single-page web interface with live visual charts
-├── history.txt          # Saved calculation history log
+├── combinatorics.py     # Pure math: n!, P, C, derangements, circular perms, multinomials, Pascal
+├── recurrence.py        # Sequence generators: Fibonacci, factorial rec, derangements, custom orders
+├── visualizer.py        # Matplotlib visual explanations (14 high-resolution chart generators)
+├── web_viewer.py        # Local Python HTTP server (serves index.html, /api/calc, /plot/ routes)
+├── main.py              # Interactive terminal CLI menu (options 0 to 18)
+├── tests.py             # 28 automated plain-function verification unit & API tests
+├── sympy_tools.py       # Symbolic verification and closed-form recurrence solver
+├── history_manager.py   # Persistent calculation audit log and search engine (history.txt)
+├── index.html           # Single-page web app (Dual-engine: Python backend + Offline JS fallback)
+├── history.txt          # Saved calculation history records
 ├── requirements.txt     # Optional libraries (matplotlib, sympy)
 ├── .gitignore           # Git ignore rules (plots/, __pycache__/)
 └── plots/               # Auto-generated demo charts (git-ignored)
@@ -181,28 +185,27 @@ PDL-Mini-Project/
 
 | Problem | Cause | Solution |
 |---|---|---|
-| Chart does not appear / "Visual explanation unavailable" | Web server is not running or file was opened via `file://` | Start `python web_viewer.py` and open `http://127.0.0.1:8000` in your browser. |
+| Chart shows "Visual explanation unavailable" | Web server is not running or file was opened via `file://` | Start `python web_viewer.py` and open `http://127.0.0.1:8000` in your browser. |
 | `ModuleNotFoundError: No module named 'matplotlib'` | Dependencies not installed in active environment | Run `pip install -r requirements.txt` inside your virtual environment. |
-| `[Error] Port 8000 is already in use` | Another process is using port 8000 | Run `python web_viewer.py 8001` and navigate to `http://127.0.0.1:8001`. |
-| "Coefficients and initial values must have absolute value <= 1000" | Custom recurrence inputs exceed chart safety limit | Use initial values and coefficients between -1000 and 1000 for visual charts. |
-| SymPy verification unavailable | SymPy is not installed | Core math and charts work normally without SymPy. To enable Option 13, run `pip install sympy`. |
+| `[Error] Port 8000 is already in use` | Another process is occupying port 8000 | Run `python web_viewer.py 8001` and open `http://127.0.0.1:8001`. |
+| SymPy verification unavailable | SymPy is not installed | Core math, charts, and API work normally without SymPy. To enable formal proofs, run `pip install sympy`. |
 
 ---
 
 ## 🙋 Quick FAQ for Reviewers
 
 **Q: Do I need an external database or web framework?**  
-**A:** No. The project runs purely on Python's built-in standard library (`http.server`) and vanilla JavaScript, requiring zero external frameworks.
+**A:** No. The project runs purely on Python's built-in standard library (`http.server`) and vanilla HTML5/CSS/JavaScript, requiring zero external server frameworks.
 
-**Q: Can I use the project without the terminal?**  
-**A:** Yes. Opening `index.html` directly gives full access to all calculators offline. Starting `python web_viewer.py` adds live dynamic charts.
+**Q: Can I use the project without running the terminal server?**  
+**A:** Yes. Opening `index.html` directly in any web browser gives full access to all calculators via the offline JavaScript BigInt fallback. Running `python web_viewer.py` activates the live Python engine and dynamic visual explanation charts.
 
 **Q: Why are large calculations exact?**  
-**A:** Python natively supports arbitrary-precision integers, computing large values like 1000! (2,568 digits) without rounding errors.
+**A:** Python natively handles arbitrary-precision integers, computing massive numbers like 1000! (2,568 digits) without floating-point rounding errors.
 
 **Q: How do I exit the CLI?**  
-**A:** Type `0` at the menu prompt or press `Ctrl + C`. Both terminate cleanly without tracebacks.
+**A:** Type `0` at the main menu prompt or press `Ctrl + C`. Both terminate cleanly.
 
 ---
 
-Academic Peer Review Project • Python 3.8+ • Matplotlib • Modern Web UI
+Academic Peer Review Project • Python 3.8+ • Matplotlib • Dual-Engine Web Architecture

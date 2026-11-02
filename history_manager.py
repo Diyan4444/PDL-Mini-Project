@@ -104,3 +104,14 @@ def search_history_records(query, filename="history.txt"):
             matches.append(r)
     
     return (matches, len(records), skipped)
+
+
+def clear_history(filename="history.txt"):
+    """Clears all records in history.txt by truncating the file."""
+    file_path = get_history_file_path(filename)
+    try:
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write("")
+        return True
+    except Exception:
+        return False

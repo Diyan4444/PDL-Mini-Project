@@ -499,8 +499,71 @@ def handle_binomial_expansion():
     prompt_and_show_visual(visualizer.plot_binomial_expansion, n, a, b)
 
 
+
+def handle_derangements():
+    print("\n--- 13. DERANGEMENTS D(n) (SUBFACTORIAL !n) ---")
+    print("Definition: Permutations of n elements where NO element appears in its original position.")
+    print("Recurrence: D(n) = (n - 1) * [D(n - 1) + D(n - 2)] with D(0) = 1, D(1) = 0.")
+    print("Inclusion-Exclusion Formula: D(n) = n! * Sum_{k=0}^{n} [(-1)^k / k!]")
+    print("Asymptotic Ratio: As n -> inf, D(n) / n! -> 1/e ~ 0.367879...")
+    
+    n = get_integer_input("Enter non-negative integer n (0 <= n <= 100): ", 0, 100)
+    rep = combinatorics.derangements_report(n)
+    d_val = rep["derangements"]
+    fact_val = rep["factorial"]
+    ratio = rep["ratio"]
+    display_res = format_large_number(d_val)
+    
+    print("\nResult for D(" + str(n) + "):")
+    print("  D(" + str(n) + ") = " + display_res)
+    print("  Total permutations n! = " + format_large_number(fact_val))
+    if ratio is not None:
+        print("  Ratio D(n)/n! = " + str(round(ratio, 8)) + " (approx " + str(round(ratio * 100, 4)) + "%)")
+        print("  Theoretical limit 1/e = " + str(round(rep["limit_1_over_e"], 8)))
+        print("  Absolute error from 1/e = " + str(round(rep["diff_from_1_over_e"], 8)))
+    
+    print("\nFirst few recurrence values:")
+    first_few = recurrence.derangements_sequence(min(max(n + 1, 6), 10))
+    print("  " + ", ".join(["D(" + str(i) + ")=" + str(v) for i, v in enumerate(first_few)]))
+    
+    history_manager.save_history_record("Derangements", "n=" + str(n), display_res)
+    prompt_and_show_visual(visualizer.plot_derangements, n)
+
+
+def handle_circular_permutations():
+    print("\n--- 14. CIRCULAR PERMUTATIONS (NECKLACES / BRACELETS) ---")
+    print("Definition: Number of distinct ways to arrange objects in a circle.")
+    print("Rotational equivalence: Any circular shift is identical -> divide linear count by cycle length.")
+    print("Full circle (all n): (n - 1)! distinct arrangements.")
+    print("Subset circle (r of n): P(n, r) / r distinct arrangements.")
+    print("Reflective equivalence (reversible necklace/bracelet): Divide by 2.")
+    
+    n = get_integer_input("Enter total items n (1 <= n <= 1000): ", 1, 1000)
+    r = get_integer_input("Enter items to arrange around circle r (1 <= r <= " + str(n) + "): ", 1, n)
+    refl_input = get_integer_input("Are reflections equivalent / necklace reversible? (1 = yes, 0 = no): ", 0, 1)
+    refl = (refl_input == 1)
+    
+    circ_val = combinatorics.circular_permutations(n, r, allow_reflections=refl)
+    lin_val = combinatorics.permutations(n, r)
+    display_res = format_large_number(circ_val)
+    
+    print("\nStep-by-step substitution:")
+    print("  Linear arrangements P(" + str(n) + ", " + str(r) + ") = " + format_large_number(lin_val))
+    if not refl:
+        print("  Circular arrangements = P(" + str(n) + ", " + str(r) + ") / " + str(r) + " = " + display_res)
+    else:
+        print("  Circular arrangements (with reflections) = P(" + str(n) + ", " + str(r) + ") / (" + str(r) + " * 2) = " + display_res)
+    
+    if n == r:
+        print("  When r = n, this simplifies directly to (n - 1)! = (" + str(n) + " - 1)! = " + str(n - 1) + "!" + (" / 2" if refl else ""))
+    
+    details_str = "n=" + str(n) + ", r=" + str(r) + (", reflections=yes" if refl else "")
+    history_manager.save_history_record("Circular Permutations", details_str, display_res)
+    prompt_and_show_visual(visualizer.plot_circular_permutations, n, r, refl)
+
+
 def handle_sympy_verification():
-    print("\n--- 13. SYMPY VERIFICATION (OPTIONAL FORMAL MATH CHECK) ---")
+    print("\n--- 15. SYMPY VERIFICATION (OPTIONAL FORMAL MATH CHECK) ---")
     if not sympy_tools.is_sympy_available():
         print(sympy_tools.get_install_instructions())
         print("All combinatorial, recurrence, and expansion features continue working independently.")
@@ -568,11 +631,21 @@ def handle_sympy_verification():
 
 
 def handle_history():
-    print("\n--- 14. CALCULATION HISTORY ---")
+    print("\n--- 16. CALCULATION HISTORY ---")
     print("Sub-menu:")
     print("  1. View all recorded calculations")
     print("  2. Search history by operation name or parameter")
-    sub_choice = get_integer_input("Select history option (1-2): ", 1, 2)
+    print("  3. Clear calculation history")
+    sub_choice = get_integer_input("Select history option (1-3): ", 1, 3)
+    
+    if sub_choice == 3:
+        confirm = get_integer_input("Are you sure you want to clear history? (1 = yes, 0 = no): ", 0, 1)
+        if confirm == 1:
+            history_manager.clear_history()
+            print("  Calculation history has been cleared.")
+        else:
+            print("  Operation cancelled.")
+        return
     
     if sub_choice == 1:
         records, skipped = history_manager.read_history_records()
@@ -610,8 +683,8 @@ def handle_self_test():
 
 
 def handle_visual_gallery():
-    print("\n--- 16. DEMO VISUAL EXPLANATION GALLERY ---")
-    print("Generating all 12 visual explanation charts into the plots/ folder...")
+    print("\n--- 18. DEMO VISUAL EXPLANATION GALLERY ---")
+    print("Generating all 14 visual explanation charts into the plots/ folder...")
     if not visualizer.is_visualizer_available():
         print("  [Visualizer Note] Matplotlib is not installed. To enable visual charts, run: pip install matplotlib")
         return
@@ -625,7 +698,7 @@ def handle_visual_gallery():
     print("\nOptions:")
     print("  Enter chart number (1-12) to open that chart in default image viewer")
     print("  Enter 0 to return to main menu")
-    choice = get_integer_input("Choice (0-12): ", 0, len(plots_list))
+    choice = get_integer_input("Choice (0-14): ", 0, len(plots_list))
     if choice > 0:
         target_path = plots_list[choice - 1][1]
         try:
@@ -660,10 +733,12 @@ def print_menu():
     print("10. Pascal's triangle")
     print("11. Recurrence relation analyzer")
     print("12. Binomial theorem expansion")
-    print("13. SymPy verification (optional formal check)")
-    print("14. History (view all / search)")
-    print("15. Run self-test (PASS/FAIL list)")
-    print("16. Visual gallery (generate all 12 demo plots)")
+    print("13. Derangements D(n) (Subfactorial !n)")
+    print("14. Circular permutations (necklaces / bracelets)")
+    print("15. SymPy verification (optional formal check)")
+    print("16. History (view all / search / clear)")
+    print("17. Run self-test (PASS/FAIL list)")
+    print("18. Visual gallery (generate all 14 demo plots)")
     print(" 0. Exit")
     print("=" * 70)
 
@@ -689,15 +764,17 @@ def main():
         10: handle_pascal_triangle,
         11: handle_recurrence,
         12: handle_binomial_expansion,
-        13: handle_sympy_verification,
-        14: handle_history,
-        15: handle_self_test,
-        16: handle_visual_gallery
+        13: handle_derangements,
+        14: handle_circular_permutations,
+        15: handle_sympy_verification,
+        16: handle_history,
+        17: handle_self_test,
+        18: handle_visual_gallery
     }
     
     while True:
         print_menu()
-        choice = get_integer_input("Select an option (0-16): ", 0, 16)
+        choice = get_integer_input("Select an option (0-18): ", 0, 18)
         
         if choice == 0:
             print("\nThank you for using Combinatorial Counting and Permutation Analyzer. Goodbye!")
@@ -710,7 +787,7 @@ def main():
             except Exception as e:
                 print("\n[Unexpected Error] An issue occurred during calculation: " + str(e))
         else:
-            print("Invalid selection. Please choose an integer between 0 and 16.")
+            print("Invalid selection. Please choose an integer between 0 and 18.")
 
 
 if __name__ == "__main__":

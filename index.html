@@ -472,16 +472,26 @@
       </li>
     </ul>
 
+    <div class="nav-group-title">Symmetries & Derangements</div>
+    <ul class="nav-list">
+      <li class="nav-item" onclick="switchView('view-derangements')">
+        <span class="nav-num">13</span> Derangements D(n) (!n)
+      </li>
+      <li class="nav-item" onclick="switchView('view-circular')">
+        <span class="nav-num">14</span> Circular Permutations
+      </li>
+    </ul>
+
     <div class="nav-group-title">Verification & Audit</div>
     <ul class="nav-list">
       <li class="nav-item" onclick="switchView('view-sympy')">
-        <span class="nav-num">13</span> Symbolic Verification (SymPy)
+        <span class="nav-num">15</span> Symbolic Verification (SymPy)
       </li>
       <li class="nav-item" onclick="switchView('view-history')">
-        <span class="nav-num">14</span> Calculation History
+        <span class="nav-num">16</span> Calculation History
       </li>
       <li class="nav-item" onclick="switchView('view-tests')">
-        <span class="nav-num">15</span> Automated Self-Test
+        <span class="nav-num">17</span> Automated Self-Test
       </li>
     </ul>
   </aside>
@@ -515,7 +525,7 @@
         <div id="fact-res" class="result-box" style="display:none;">
           <div class="result-header">
             <span class="result-title">Calculation Output</span>
-            <span class="formula-badge">n! = n &times; (n - 1) &times; ... &times; 1</span>
+            <span class="formula-badge" id="fact-engine-badge">[Python Engine]</span> <span class="formula-badge">n! = n &times; (n - 1) &times; ... &times; 1</span>
           </div>
           <div class="result-value" id="fact-val">-</div>
           <div class="expl-box" id="fact-expl"></div>
@@ -543,7 +553,7 @@
         <div id="perm-res" class="result-box" style="display:none;">
           <div class="result-header">
             <span class="result-title">Result</span>
-            <span class="formula-badge">P(n, r) = n! / (n - r)!</span>
+            <span class="formula-badge" id="perm-engine-badge">[Python Engine]</span> <span class="formula-badge">P(n, r) = n! / (n - r)!</span>
           </div>
           <div class="result-value" id="perm-val">-</div>
           <div class="expl-box" id="perm-expl"></div>
@@ -571,7 +581,7 @@
         <div id="comb-res" class="result-box" style="display:none;">
           <div class="result-header">
             <span class="result-title">Result</span>
-            <span class="formula-badge">C(n, r) = n! / (r! &times; (n - r)!)</span>
+            <span class="formula-badge" id="comb-engine-badge">[Python Engine]</span> <span class="formula-badge">C(n, r) = n! / (r! &times; (n - r)!)</span>
           </div>
           <div class="result-value" id="comb-val">-</div>
           <div class="expl-box" id="comb-expl"></div>
@@ -669,7 +679,7 @@
         <div id="crep-res" class="result-box" style="display:none;">
           <div class="result-header">
             <span class="result-title">Result</span>
-            <span class="formula-badge">C(n + r - 1, r)</span>
+            <span class="formula-badge" id="crep-engine-badge">[Python Engine]</span> <span class="formula-badge">C(n + r - 1, r)</span>
           </div>
           <div class="result-value" id="crep-val">-</div>
           <div class="expl-box" id="crep-expl"></div>
@@ -874,7 +884,7 @@
 
         <div id="exp-res" class="result-box" style="display:none;">
           <div class="result-header">
-            <span class="result-title">Expanded Polynomial</span>
+            <span class="result-title">Expanded Polynomial</span> <span class="formula-badge" id="exp-engine-badge">[Python Engine]</span>
           </div>
           <div class="result-value" style="font-size:1.15rem;" id="exp-val">-</div>
           <div class="expl-box" id="exp-expl"></div>
@@ -882,12 +892,85 @@
       </div>
     </div>
 
-    <!-- 13. SYMPY / SYMBOLIC -->
+    <!-- 13. DERANGEMENTS -->
+    <div id="view-derangements" class="view-panel">
+      <div class="card">
+        <div class="card-title">Derangements D(n) (Subfactorial !n)</div>
+        <div class="card-desc">Number of permutations of n elements where NO element appears in its original position. Recurrence: D(n) = (n - 1) &times; [D(n - 1) + D(n - 2)].</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Non-negative integer n (0 &le; n &le; 100):</label>
+            <input type="number" id="derange-n" value="5" min="0" max="100">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="calcDerangements()">Calculate Derangements</button>
+
+        <div id="derange-res" class="result-box" style="display:none;">
+          <div class="result-header">
+            <span class="result-title">Derangements Output</span>
+            <span class="formula-badge" id="derange-engine-badge">[Python Engine]</span>
+          </div>
+          <div class="result-value" id="derange-val">-</div>
+          <div class="expl-box" id="derange-expl"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 14. CIRCULAR PERMUTATIONS -->
+    <div id="view-circular" class="view-panel">
+      <div class="card">
+        <div class="card-title">Circular Permutations (Rotations &amp; Necklaces)</div>
+        <div class="card-desc">Arranging items along a closed circle where rotational shifts are indistinguishable. Full circle: (n - 1)!. Subset: P(n, r) / r. Reversible necklace/bracelet: &divide; 2.</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Total items (n &ge; 1):</label>
+            <input type="number" id="circ-n" value="5" min="1" max="1000">
+          </div>
+          <div class="form-group">
+            <label>Arranged around circle (1 &le; r &le; n):</label>
+            <input type="number" id="circ-r" value="3" min="1" max="1000">
+          </div>
+          <div class="form-group" style="justify-content: flex-end;">
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:600; font-size:0.85rem; color:#475569; padding-top:22px;">
+              <input type="checkbox" id="circ-refl" style="width:17px; height:17px; accent-color:var(--primary);">
+              <span>Reflections identical (Reversible necklace/bracelet &divide; 2)</span>
+            </label>
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="calcCircular()">Calculate Circular Permutations</button>
+
+        <div id="circ-res" class="result-box" style="display:none;">
+          <div class="result-header">
+            <span class="result-title">Circular Permutations Output</span>
+            <span class="formula-badge" id="circ-engine-badge">[Python Engine]</span>
+          </div>
+          <div class="result-value" id="circ-val">-</div>
+          <div class="expl-box" id="circ-expl"></div>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- 15. SYMPY / SYMBOLIC -->
     <div id="view-sympy" class="view-panel">
       <div class="card">
-        <div class="card-title">Symbolic Mathematics &amp; SymPy Verification Reference</div>
-        <div class="card-desc">Formal mathematical relationships verified symbolically in the companion Python tool.</div>
-        <div style="display:flex; flex-direction:column; gap:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
+          <div>
+            <div class="card-title">Symbolic Mathematics &amp; SymPy Verification</div>
+            <div class="card-desc" style="margin-bottom:0;">Live execution of symbolic proofs and closed-form solves via Python backend.</div>
+          </div>
+          <button class="btn btn-primary" onclick="runLiveSymPyVerification()">Run Live Python SymPy Verification</button>
+        </div>
+
+        <div id="sympy-live-box" style="margin-top:16px; display:none; background:#f8fafc; border:1px solid var(--border); border-radius:8px; padding:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <span id="sympy-version-tag" class="tag-badge" style="background:#dbeafe; color:#1e40af;">Detecting SymPy...</span>
+            <span id="sympy-status-text" style="font-size:0.85rem; color:var(--text-muted);"></span>
+          </div>
+          <div id="sympy-checks-list" style="display:flex; flex-direction:column; gap:10px;"></div>
+        </div>
+
+        <div style="display:flex; flex-direction:column; gap:16px; margin-top:20px;">
           <div style="background:#f8fafc; border:1px solid var(--border); border-radius:6px; padding:16px;">
             <h4 style="font-size:0.95rem; margin-bottom:6px;">1. Closed-Form Recurrence via SymPy rsolve()</h4>
             <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:8px;">
@@ -948,7 +1031,7 @@
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
           <div>
             <div class="card-title">Automated Verification Test Suite</div>
-            <div class="card-desc" style="margin-bottom:0;">Live execution of the 13 assertion-based unit tests.</div>
+            <div class="card-desc" style="margin-bottom:0;">Live execution of the 16 automated frontend verification tests.</div>
           </div>
           <button class="btn btn-primary" onclick="runSelfTests()">Run All Tests</button>
         </div>
@@ -1030,7 +1113,7 @@
     // =========================================================================
     const HIST_KEY = "combinatorics_history_log";
 
-    function saveHistory(op, inputs, result) {
+    async function saveHistory(op, inputs, result) {
       const now = new Date();
       const ts = now.toISOString().slice(0, 19).replace("T", " ");
       const rec = {
@@ -1039,42 +1122,140 @@
         inputs: String(inputs).replace(/[|\n\r]/g, " "),
         result: String(result).replace(/[|\n\r]/g, " ")
       };
-      const existing = JSON.parse(localStorage.getItem(HIST_KEY) || "[]");
-      existing.unshift(rec);
-      if (existing.length > 200) existing.pop();
-      localStorage.setItem(HIST_KEY, JSON.stringify(existing));
+      // 1. Local browser storage
+      try {
+        const existing = JSON.parse(localStorage.getItem(HIST_KEY) || "[]");
+        existing.unshift(rec);
+        if (existing.length > 200) existing.pop();
+        localStorage.setItem(HIST_KEY, JSON.stringify(existing));
+      } catch (e) {}
+
+      // 2. Python backend history.txt persistence
+      try {
+        fetch("/api/history", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ operation: op, parameters: inputs, result: result })
+        }).catch(() => {});
+      } catch (e) {}
+
       renderHistoryTable();
     }
 
-    function renderHistoryTable() {
+    async function renderHistoryTable() {
       const query = (document.getElementById("hist-search")?.value || "").toLowerCase().trim();
-      const records = JSON.parse(localStorage.getItem(HIST_KEY) || "[]");
       const tbody = document.getElementById("hist-tbody");
       if (!tbody) return;
 
-      const filtered = records.filter(r => 
-        r.operation.toLowerCase().includes(query) || r.inputs.toLowerCase().includes(query)
-      );
+      let records = [];
+      try {
+        const res = await fetch("/api/history" + (query ? "?q=" + encodeURIComponent(query) : ""));
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.success && Array.isArray(data.records)) {
+            records = data.records;
+          }
+        }
+      } catch (err) {}
 
-      if (filtered.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">No records found.</td></tr>`;
+      if (records.length === 0) {
+        const local = JSON.parse(localStorage.getItem(HIST_KEY) || "[]");
+        records = local.filter(r => 
+          (r.operation || "").toLowerCase().includes(query) || (r.inputs || r.parameters || "").toLowerCase().includes(query)
+        );
+      }
+
+      if (records.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">No calculation records recorded yet.</td></tr>`;
         return;
       }
 
-      tbody.innerHTML = filtered.map(r => `
+      tbody.innerHTML = records.map(r => `
         <tr>
-          <td style="font-family:var(--font-mono); font-size:0.8rem; color:var(--text-muted);">${r.timestamp}</td>
-          <td><b>${r.operation}</b></td>
-          <td style="font-family:var(--font-mono); font-size:0.82rem;">${r.inputs}</td>
-          <td style="font-family:var(--font-mono); font-weight:600; color:var(--primary); word-break:break-all;">${r.result}</td>
+          <td style="font-family:var(--font-mono); font-size:0.8rem; color:var(--text-muted);">${r.timestamp || "-"}</td>
+          <td><b>${r.operation || "-"}</b></td>
+          <td style="font-family:var(--font-mono); font-size:0.82rem;">${r.inputs || r.parameters || "-"}</td>
+          <td style="font-family:var(--font-mono); font-weight:600; color:var(--primary); word-break:break-all;">${r.result || "-"}</td>
         </tr>
       `).join("");
     }
 
-    function clearHistory() {
-      if (confirm("Clear all calculation records?")) {
-        localStorage.removeItem(HIST_KEY);
+    async function clearHistory() {
+      if (confirm("Clear all calculation records from both server history.txt and local browser storage?")) {
+        try {
+          await fetch("/api/history", { method: "DELETE" });
+        } catch (e) {}
+        try {
+          localStorage.removeItem(HIST_KEY);
+        } catch (e) {}
         renderHistoryTable();
+      }
+    }
+
+    // =========================================================================
+    // SYMPY LIVE PROOF RUNNER
+    // =========================================================================
+    async function runLiveSymPyVerification() {
+      const box = document.getElementById("sympy-live-box");
+      const tag = document.getElementById("sympy-version-tag");
+      const statusText = document.getElementById("sympy-status-text");
+      const list = document.getElementById("sympy-checks-list");
+      if (!box || !tag || !list) return;
+
+      box.style.display = "block";
+      tag.textContent = "Connecting to Python SymPy...";
+      tag.style.background = "#dbeafe";
+      tag.style.color = "#1e40af";
+      statusText.textContent = "Querying /api/sympy backend...";
+      list.innerHTML = `<div style="color:var(--text-muted); font-size:0.85rem; padding:12px 0;">Executing symbolic proofs in Python environment...</div>`;
+
+      try {
+        const res = await fetch("/api/sympy");
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const data = await res.json();
+        const sym = data.sympy || {};
+
+        if (sym.available) {
+          tag.textContent = "SymPy " + (sym.version || "Active") + " Verified";
+          tag.style.background = "#dcfce7";
+          tag.style.color = "#15803d";
+          statusText.textContent = sym.message || "All formal symbolic checks passed.";
+
+          list.innerHTML = (sym.results || []).map(item => `
+            <div style="background:#fff; border:1px solid #cbd5e1; border-radius:6px; padding:12px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <b style="font-size:0.88rem;">${item.name}</b>
+                <span class="badge ${item.verified ? 'badge-pass' : 'badge-fail'}">${item.verified ? 'VERIFIED MATCH' : 'MISMATCH'}</span>
+              </div>
+              <div style="font-family:var(--font-mono); font-size:0.82rem; color:#334155; margin-bottom:4px;">${item.expression || ""}</div>
+              <div style="font-size:0.8rem; color:var(--text-muted);">${item.detail || ""}</div>
+            </div>
+          `).join("");
+        } else {
+          tag.textContent = "SymPy Not Installed";
+          tag.style.background = "#fee2e2";
+          tag.style.color = "#b91c1c";
+          statusText.textContent = "Optional library not detected in environment.";
+          list.innerHTML = `
+            <div style="font-size:0.85rem; color:#475569;">
+              To enable formal symbolic verification, run in your terminal:
+              <pre style="background:#fff; padding:8px; border-radius:4px; margin-top:6px; border:1px solid #cbd5e1;">pip install sympy</pre>
+              All combinatorial calculations and visualizers continue to work without SymPy.
+            </div>
+          `;
+        }
+      } catch (err) {
+        tag.textContent = "Server Offline (Using Direct HTML)";
+        tag.style.background = "#fef3c7";
+        tag.style.color = "#b45309";
+        statusText.textContent = "Python web server not active.";
+        list.innerHTML = `
+          <div style="font-size:0.85rem; color:#475569;">
+            Launch the Python server to run live symbolic verification:
+            <pre style="background:#fff; padding:8px; border-radius:4px; margin-top:6px; border:1px solid #cbd5e1;">python web_viewer.py</pre>
+            Then open <a href="http://127.0.0.1:8000" target="_blank" style="color:var(--primary); font-weight:600;">http://127.0.0.1:8000</a> in your browser.
+          </div>
+        `;
       }
     }
 
@@ -1094,9 +1275,11 @@
       "view-pascal": ["Pascal's Triangle Generator", "Visual pyramid constructed via adjacent element sums"],
       "view-recurrence": ["Recurrence Relation Analyzer", "Sequential numerical term generation for linear recurrences"],
       "view-expansion": ["Binomial Theorem Expansion", "Expand (a*x + b*y)^n into clean algebraic polynomials"],
+      "view-derangements": ["Derangements D(n) (Subfactorial !n)", "Permutations with zero fixed points: D(n) = (n - 1) * [D(n-1) + D(n-2)]"],
+      "view-circular": ["Circular Permutations", "Rotational equivalence around a circle: P(n, r) / r and necklaces &divide; 2"],
       "view-sympy": ["Symbolic Verification (SymPy Reference)", "Formal mathematical relationships verified symbolically in Python"],
-      "view-history": ["Calculation History Log", "Session audit log matching history.txt"],
-      "view-tests": ["Automated Self-Test Suite", "Live execution of the 13 assertion-based unit tests"]
+      "view-history": ["Calculation History Log", "Session audit log unified with history.txt"],
+      "view-tests": ["Automated Self-Test Suite", "Live execution of the automated verification test suite"]
     };
 
     function switchView(viewId) {
@@ -1250,16 +1433,66 @@
     }
 
     // =========================================================================
+    // DUAL-ENGINE CALCULATION BRIDGE (PYTHON PRIMARY + OFFLINE JS FALLBACK)
+    // =========================================================================
+
+    async function callApiCalc(operation, params) {
+      try {
+        const qs = new URLSearchParams(params).toString();
+        const res = await fetch(`/api/calc?op=${encodeURIComponent(operation)}&${qs}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.success) {
+            return { online: true, data: data };
+          }
+        }
+      } catch (e) {
+        // Offline or server not running
+      }
+      return { online: false };
+    }
+
+    function setEngineBadge(badgeId, isPython) {
+      const badge = document.getElementById(badgeId);
+      if (!badge) return;
+      if (isPython) {
+        badge.textContent = "[Python Engine]";
+        badge.style.background = "#dcfce7";
+        badge.style.color = "#15803d";
+      } else {
+        badge.textContent = "[Offline JS Fallback]";
+        badge.style.background = "#fef3c7";
+        badge.style.color = "#b45309";
+      }
+    }
+
+    function parseStrictInt(val) {
+      if (val === null || val === undefined) return NaN;
+      const s = String(val).trim();
+      if (!/^-?\d+$/.test(s)) return NaN;
+      const num = Number(s);
+      if (!Number.isSafeInteger(num)) return NaN;
+      return num;
+    }
+
+    // =========================================================================
     // ACTION HANDLERS
     // =========================================================================
 
-    function calcFactorial() {
-      const n = parseInt(document.getElementById("fact-n").value);
+    async function calcFactorial() {
+      const n = parseStrictInt(document.getElementById("fact-n").value);
       if (isNaN(n) || n < 0 || n > 1000) {
         alert("Please enter a whole integer between 0 and 1000."); return;
       }
-      const res = factorial(n);
-      const display = formatLargeNum(res);
+      let display = "";
+      const api = await callApiCalc("factorial", { n: n });
+      if (api.online) {
+        setEngineBadge("fact-engine-badge", true);
+        display = api.data.result;
+      } else {
+        setEngineBadge("fact-engine-badge", false);
+        display = formatLargeNum(factorial(n));
+      }
 
       document.getElementById("fact-val").innerText = n + "! = " + display;
       document.getElementById("fact-expl").innerHTML = `
@@ -1271,14 +1504,21 @@
       showPlot("fact-res", "factorial", { n: n }, `Visual explanation for ${n}!`);
     }
 
-    function calcPermutations() {
-      const n = parseInt(document.getElementById("perm-n").value);
-      const r = parseInt(document.getElementById("perm-r").value);
+    async function calcPermutations() {
+      const n = parseStrictInt(document.getElementById("perm-n").value);
+      const r = parseStrictInt(document.getElementById("perm-r").value);
       if (isNaN(n) || isNaN(r) || n < 0 || r < 0 || r > n || n > 1000) {
         alert("Please enter integers satisfying 0 <= r <= n <= 1000."); return;
       }
-      const res = permutations(n, r);
-      const display = formatLargeNum(res);
+      let display = "";
+      const api = await callApiCalc("permutations", { n: n, r: r });
+      if (api.online) {
+        setEngineBadge("perm-engine-badge", true);
+        display = api.data.result;
+      } else {
+        setEngineBadge("perm-engine-badge", false);
+        display = formatLargeNum(permutations(n, r));
+      }
 
       document.getElementById("perm-val").innerText = `P(${n}, ${r}) = ` + display;
       document.getElementById("perm-expl").innerHTML = `
@@ -1290,14 +1530,21 @@
       showPlot("perm-res", "permutations", { n: n, r: r }, `Visual explanation for P(${n}, ${r})`);
     }
 
-    function calcCombinations() {
-      const n = parseInt(document.getElementById("comb-n").value);
-      const r = parseInt(document.getElementById("comb-r").value);
+    async function calcCombinations() {
+      const n = parseStrictInt(document.getElementById("comb-n").value);
+      const r = parseStrictInt(document.getElementById("comb-r").value);
       if (isNaN(n) || isNaN(r) || n < 0 || r < 0 || r > n || n > 1000) {
         alert("Please enter integers satisfying 0 <= r <= n <= 1000."); return;
       }
-      const res = combinations(n, r);
-      const display = formatLargeNum(res);
+      let display = "";
+      const api = await callApiCalc("combinations", { n: n, r: r });
+      if (api.online) {
+        setEngineBadge("comb-engine-badge", true);
+        display = api.data.result;
+      } else {
+        setEngineBadge("comb-engine-badge", false);
+        display = formatLargeNum(combinations(n, r));
+      }
 
       document.getElementById("comb-val").innerText = `C(${n}, ${r}) = ` + display;
       document.getElementById("comb-expl").innerHTML = `
@@ -1310,8 +1557,8 @@
     }
 
     function calcComparison() {
-      const n = parseInt(document.getElementById("comp-n").value);
-      const r = parseInt(document.getElementById("comp-r").value);
+      const n = parseStrictInt(document.getElementById("comp-n").value);
+      const r = parseStrictInt(document.getElementById("comp-r").value);
       if (isNaN(n) || isNaN(r) || n < 0 || r < 0 || r > n || n > 1000) {
         alert("Please enter integers satisfying 0 <= r <= n <= 1000."); return;
       }
@@ -1355,8 +1602,8 @@
     }
 
     function calcPermRep() {
-      const n = parseInt(document.getElementById("prep-n").value);
-      const r = parseInt(document.getElementById("prep-r").value);
+      const n = parseStrictInt(document.getElementById("prep-n").value);
+      const r = parseStrictInt(document.getElementById("prep-r").value);
       if (isNaN(n) || isNaN(r) || n < 0 || r < 0 || n > 1000 || r > 1000) {
         alert("Please enter non-negative integers <= 1000."); return;
       }
@@ -1374,8 +1621,8 @@
     }
 
     function calcCombRep() {
-      const n = parseInt(document.getElementById("crep-n").value);
-      const r = parseInt(document.getElementById("crep-r").value);
+      const n = parseStrictInt(document.getElementById("crep-n").value);
+      const r = parseStrictInt(document.getElementById("crep-r").value);
       if (isNaN(n) || isNaN(r) || n < 0 || r < 0 || n > 1000 || r > 1000) {
         alert("Please enter non-negative integers <= 1000."); return;
       }
@@ -1428,8 +1675,8 @@
       let theo = 0n;
 
       if (mode === "perm") {
-        const n = parseInt(document.getElementById("list-n").value);
-        const r = parseInt(document.getElementById("list-r").value);
+        const n = parseStrictInt(document.getElementById("list-n").value);
+        const r = parseStrictInt(document.getElementById("list-r").value);
         if (isNaN(n) || isNaN(r) || n < 1 || r < 1 || r > n || n > 8) {
           alert("Please enter 1 <= r <= n <= 8."); return;
         }
@@ -1447,8 +1694,8 @@
         }
         permute(chars);
       } else if (mode === "comb") {
-        const n = parseInt(document.getElementById("list-n").value);
-        const r = parseInt(document.getElementById("list-r").value);
+        const n = parseStrictInt(document.getElementById("list-n").value);
+        const r = parseStrictInt(document.getElementById("list-r").value);
         if (isNaN(n) || isNaN(r) || n < 1 || r < 1 || r > n || n > 8) {
           alert("Please enter 1 <= r <= n <= 8."); return;
         }
@@ -1502,15 +1749,15 @@
         const wordVal = document.getElementById("list-word").value.trim();
         showPlot("list-res", "listing", { mode: "multi", word: wordVal }, `Visual listing for multiset '${wordVal}'`);
       } else {
-        const listN = parseInt(document.getElementById("list-n").value);
-        const listR = parseInt(document.getElementById("list-r").value);
+        const listN = parseStrictInt(document.getElementById("list-n").value);
+        const listR = parseStrictInt(document.getElementById("list-r").value);
         showPlot("list-res", "listing", { mode: mode, n: listN, r: listR }, `Visual listing for ${mode === 'perm' ? 'P' : 'C'}(${listN}, ${listR})`);
       }
     }
 
     function verifyIdentities() {
-      const n = parseInt(document.getElementById("id-n").value);
-      const r = parseInt(document.getElementById("id-r").value);
+      const n = parseStrictInt(document.getElementById("id-n").value);
+      const r = parseStrictInt(document.getElementById("id-r").value);
       if (isNaN(n) || isNaN(r) || n < 0 || r < 0 || r > n || n > 1000) {
         alert("Please enter 0 <= r <= n <= 1000."); return;
       }
@@ -1558,7 +1805,7 @@
     }
 
     function renderPascal() {
-      const rows = parseInt(document.getElementById("pascal-rows").value);
+      const rows = parseStrictInt(document.getElementById("pascal-rows").value);
       if (isNaN(rows) || rows < 1 || rows > 15) {
         alert("Please enter a row count between 1 and 15."); return;
       }
@@ -1600,7 +1847,7 @@
     }
 
     function renderCustomRecFields() {
-      const k = parseInt(document.getElementById("rec-order").value) || 2;
+      const k = parseStrictInt(document.getElementById("rec-order").value) || 2;
       let html = `<div style="display:grid; grid-template-columns: repeat(${k}, 1fr); gap:10px; margin-bottom:12px;">`;
       for (let i = 1; i <= k; i++) {
         html += `
@@ -1625,7 +1872,7 @@
 
     function calcRecurrence() {
       const type = document.getElementById("rec-type").value;
-      const terms = parseInt(document.getElementById("rec-terms").value);
+      const terms = parseStrictInt(document.getElementById("rec-terms").value);
       if (isNaN(terms) || terms < 1 || terms > 50) {
         alert("Please enter terms between 1 and 50."); return;
       }
@@ -1650,18 +1897,18 @@
           seq.push(BigInt(n) * seq[n - 1]);
         }
       } else {
-        const k = parseInt(document.getElementById("rec-order").value);
+        const k = parseStrictInt(document.getElementById("rec-order").value);
         customK = k;
         const coeffs = [];
         const inits = [];
         for (let i = 1; i <= k; i++) {
-          const c = parseInt(document.getElementById(`rec-c-${i}`).value);
+          const c = parseStrictInt(document.getElementById(`rec-c-${i}`).value);
           if (isNaN(c)) { alert(`Invalid coefficient c${i}`); return; }
           if (i === k && c === 0) { alert(`Trailing coefficient c${k} cannot be 0!`); return; }
           coeffs.push(BigInt(c));
         }
         for (let i = 0; i < k; i++) {
-          const a = parseInt(document.getElementById(`rec-a-${i}`).value);
+          const a = parseStrictInt(document.getElementById(`rec-a-${i}`).value);
           if (isNaN(a)) { alert(`Invalid initial value a(${i})`); return; }
           inits.push(BigInt(a));
         }
@@ -1701,9 +1948,9 @@
     }
 
     function calcExpansion() {
-      const n = parseInt(document.getElementById("exp-n").value);
-      const a = parseInt(document.getElementById("exp-a").value);
-      const b = parseInt(document.getElementById("exp-b").value);
+      const n = parseStrictInt(document.getElementById("exp-n").value);
+      const a = parseStrictInt(document.getElementById("exp-a").value);
+      const b = parseStrictInt(document.getElementById("exp-b").value);
       if (isNaN(n) || isNaN(a) || isNaN(b) || n < 0 || n > 20 || Math.abs(a) > 10 || Math.abs(b) > 10) {
         alert("Please enter 0 <= n <= 20 and |a|, |b| <= 10."); return;
       }
@@ -1747,6 +1994,91 @@
       document.getElementById("exp-res").style.display = "block";
       saveHistory("Expansion", inputExpr, expansionStr);
       showPlot("exp-res", "expansion", { n: n, a: a, b: b }, `Visual explanation for expansion of ${inputExpr}`);
+    }
+
+
+    async function calcDerangements() {
+      const n = parseStrictInt(document.getElementById("derange-n").value);
+      if (isNaN(n) || n < 0 || n > 100) {
+        alert("Please enter a non-negative integer n between 0 and 100."); return;
+      }
+
+      let display = "";
+      let ratioText = "";
+      const api = await callApiCalc("derangements", { n: n });
+
+      if (api.online) {
+        setEngineBadge("derange-engine-badge", true);
+        display = api.data.result;
+        const rVal = api.data.ratio !== null ? (api.data.ratio * 100).toFixed(4) + "%" : "N/A";
+        ratioText = `<b>Ratio D(n)/n!:</b> ${api.data.ratio !== null ? api.data.ratio.toFixed(8) : "N/A"} (${rVal})<br>
+                     <b>Theoretical Limit 1/e:</b> ${api.data.ratio_approx_1_over_e ? api.data.ratio_approx_1_over_e.toFixed(8) : "~0.367879"}`;
+      } else {
+        setEngineBadge("derange-engine-badge", false);
+        // JS BigInt recurrence: D(i) = (i - 1) * (D(i-1) + D(i-2))
+        let d0 = 1n, d1 = 0n;
+        if (n === 0) display = "1";
+        else if (n === 1) display = "0";
+        else {
+          let curr = 0n;
+          for (let i = 2; i <= n; i++) {
+            curr = BigInt(i - 1) * (d1 + d0);
+            d0 = d1;
+            d1 = curr;
+          }
+          display = formatLargeNum(d1);
+        }
+        ratioText = `<b>Asymptotic Property:</b> As n &rarr; &infin;, D(n)/n! &rarr; 1/e &asymp; 0.367879...`;
+      }
+
+      document.getElementById("derange-val").innerText = `D(${n}) = ` + display;
+      document.getElementById("derange-expl").innerHTML = `
+        <b>Definition:</b> Subfactorial !${n} represents permutations of ${n} elements where no element is fixed in its natural position.<br>
+        <b>Recurrence Relation:</b> D(n) = (n - 1) &times; [D(n - 1) + D(n - 2)] with D(0) = 1, D(1) = 0.<br>
+        <b>Inclusion-Exclusion Formula:</b> D(n) = n! &times; &sum;_{k=0}^{n} [(-1)^k / k!]<br>
+        ${ratioText}
+      `;
+      document.getElementById("derange-res").style.display = "block";
+      saveHistory("Derangements", `n=${n}`, display);
+      showPlot("derange-res", "derangements", { n: n }, `Visual explanation for D(${n})`);
+    }
+
+    async function calcCircular() {
+      const n = parseStrictInt(document.getElementById("circ-n").value);
+      const r = parseStrictInt(document.getElementById("circ-r").value);
+      const refl = document.getElementById("circ-refl").checked;
+      if (isNaN(n) || isNaN(r) || n < 1 || r < 1 || r > n || n > 1000) {
+        alert("Please enter integers satisfying 1 <= r <= n <= 1000."); return;
+      }
+
+      let display = "";
+      const api = await callApiCalc("circular", { n: n, r: r, allow_reflections: refl ? "1" : "0" });
+
+      if (api.online) {
+        setEngineBadge("circ-engine-badge", true);
+        display = api.data.result;
+      } else {
+        setEngineBadge("circ-engine-badge", false);
+        // JS BigInt calculation
+        let p = permutations(n, r);
+        let count = p / BigInt(r);
+        if (refl && r >= 3) {
+          count = count / 2n;
+        }
+        display = formatLargeNum(count);
+      }
+
+      document.getElementById("circ-val").innerText = `P_circ(${n}, ${r}) = ` + display;
+      document.getElementById("circ-expl").innerHTML = `
+        <b>Arrangement Symmetry:</b> ${refl ? "Reversible necklace / bracelet (rotations and reflections identical)" : "Directed circle (rotations identical, clockwise &ne; counterclockwise)"}<br>
+        <b>Linear Permutations P(${n}, ${r}):</b> ${formatLargeNum(permutations(n, r))}<br>
+        <b>Rotational symmetry:</b> Dividing by cycle length ${r} collapses identical circular shifts into single orbits.<br>
+        ${refl && r >= 3 ? "<b>Reflective symmetry:</b> Dividing by 2 accounts for turning the circular ring or necklace over.<br>" : ""}
+        <b>Result:</b> ${display} distinct arrangements.
+      `;
+      document.getElementById("circ-res").style.display = "block";
+      saveHistory("Circular Permutations", `n=${n}, r=${r}, refl=${refl ? "yes" : "no"}`, display);
+      showPlot("circ-res", "circular", { n: n, r: r, allow_reflections: refl ? "1" : "0" }, `Visual explanation for circular permutations`);
     }
 
     // =========================================================================
@@ -1830,6 +2162,27 @@
           const bigFact = factorial(30);
           const bigPerm = permutations(30, 15);
           return (bigFact / factorial(15)) === bigPerm;
+        }],
+        ["Derangements D(n) known values (D(0)=1, D(1)=0, D(5)=44, D(6)=265)", () => {
+          let d0 = 1n, d1 = 0n;
+          const exp = [1n, 0n, 1n, 2n, 9n, 44n, 265n];
+          for (let i = 2; i <= 6; i++) {
+            let cur = BigInt(i - 1) * (d1 + d0);
+            if (cur !== exp[i]) return false;
+            d0 = d1; d1 = cur;
+          }
+          return true;
+        }],
+        ["Circular permutations with rotational and reflective symmetry", () => {
+          const c55 = permutations(5, 5) / 5n;
+          const c53 = permutations(5, 3) / 3n;
+          const c55_refl = c55 / 2n;
+          const c53_refl = c53 / 2n;
+          return c55 === 24n && c53 === 20n && c55_refl === 12n && c53_refl === 10n;
+        }],
+        ["Multinomial coefficients generalized partition arrangements", () => {
+          const miss = multisetArrangementsCount("MISSISSIPPI");
+          return miss.total === 34650n;
         }]
       ];
 
