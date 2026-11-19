@@ -4,125 +4,67 @@
 #   Diyan Shah        - 251080020
 #   Aryan Adivarekar  - 251080008
 #   Advait Deodhar    - 251080018
-# Module: history_manager.py - Persistent record saving, loading, and searching
+#
+# Saves every calculation to history.txt (next to this file), one record per line:
+#   timestamp|operation|inputs|result
 
 import os
 import datetime
 
-
-# Default history file used when no filename is passed. The test suite points this
-# at a temporary file so that running tests never touches the real history.txt.
+# tests.py points this at a temporary file so running the tests never changes the real history.
 DEFAULT_HISTORY_FILENAME = "history.txt"
+FIELDS = ("timestamp", "operation", "inputs", "result")
 
 
 def get_history_file_path(filename=None):
-    """Returns absolute path to the history file located alongside this module."""
-    if filename is None:
-        filename = DEFAULT_HISTORY_FILENAME
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(base_dir, filename)
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), filename or DEFAULT_HISTORY_FILENAME)
 
 
-def sanitize_field(text):
-    """Sanitizes text fields by replacing pipe delimiter and newlines with spaces."""
-    cleaned = str(text)
-    cleaned = cleaned.replace("|", " ")
-    cleaned = cleaned.replace("\r", " ")
-    cleaned = cleaned.replace("\n", " ")
-    return cleaned.strip()
+def clean(text):
+    # "|" separates fields and newlines separate records, so both become single spaces.
+    return " ".join(str(text).replace("|", " ").split())
 
 
-def save_history_record(operation, inputs_str, result_str, filename=None):
-    """Appends one calculation record to history.txt.
-    
-    Record format: timestamp|operation|inputs|result
-    Any pipe characters in fields are sanitized to spaces.
-    Uses UTF-8 encoding.
-    """
-    file_path = get_history_file_path(filename)
-    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    clean_op = sanitize_field(operation)
-    clean_in = sanitize_field(inputs_str)
-    clean_res = sanitize_field(result_str)
-    
-    record_line = clean_op + "|" + clean_in + "|" + clean_res
-    full_line = now_str + "|" + record_line + "\n"
-    
+def save_history_record(operation, inputs, result, filename=None):
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    line = "|".join([timestamp, clean(operation), clean(inputs), clean(result)])
     try:
-        with open(file_path, "a", encoding="utf-8") as f:
-            f.write(full_line)
+        with open(get_history_file_path(filename), "a", encoding="utf-8") as f:
+            f.write(line + "\n")
         return True
-    except Exception as e:
-        # File errors must not crash the application
+    except OSError:
         return False
 
 
 def read_history_records(filename=None):
-    """Reads all history records from history.txt.
-    
-    Handles missing file, empty file, and skips malformed lines.
-    Returns a tuple: (list_of_record_dicts, skipped_malformed_count).
-    Each dict contains: 'timestamp', 'operation', 'inputs', 'result'.
-    """
-    file_path = get_history_file_path(filename)
-    
-    if not os.path.exists(file_path):
-        return ([], 0)
-    
-    records = []
-    skipped_count = 0
-    
+    # Returns (records, skipped). Lines without exactly 4 fields are counted, not fatal.
+    records, skipped = [], 0
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-        
-        for raw_line in lines:
-            line = raw_line.strip()
-            if not line:
-                continue
-            parts = line.split("|")
-            if len(parts) == 4:
-                records.append({
-                    "timestamp": parts[0].strip(),
-                    "operation": parts[1].strip(),
-                    "inputs": parts[2].strip(),
-                    "result": parts[3].strip()
-                })
-            else:
-                skipped_count = skipped_count + 1
-        
-        return (records, skipped_count)
-    except Exception:
-        return ([], 0)
+        with open(get_history_file_path(filename), encoding="utf-8") as f:
+            for line in f:
+                parts = line.strip().split("|")
+                if len(parts) == len(FIELDS):
+                    records.append(dict(zip(FIELDS, (p.strip() for p in parts))))
+                elif line.strip():
+                    skipped += 1
+    except OSError:
+        # A missing file just means nothing has been saved yet.
+        pass
+    return records, skipped
 
 
 def search_history_records(query, filename=None):
-    """Searches history records matching query in operation or inputs (case-insensitive).
-    
-    Returns a tuple: (matching_records, total_records_count, skipped_count).
-    """
+    # Case-insensitive match on the operation name or the inputs.
+    # Returns (matches, total number of records, skipped lines).
     records, skipped = read_history_records(filename)
-    if not query:
-        return (records, len(records), skipped)
-    
-    normalized_query = query.strip().lower()
-    matches = []
-    for r in records:
-        op_match = normalized_query in r["operation"].lower()
-        in_match = normalized_query in r["inputs"].lower()
-        if op_match or in_match:
-            matches.append(r)
-    
-    return (matches, len(records), skipped)
+    query = query.strip().lower()
+    matches = [r for r in records if query in r["operation"].lower() or query in r["inputs"].lower()]
+    return matches, len(records), skipped
 
 
 def clear_history(filename=None):
-    """Clears all records in history.txt by truncating the file."""
-    file_path = get_history_file_path(filename)
     try:
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write("")
+        open(get_history_file_path(filename), "w", encoding="utf-8").close()
         return True
-    except Exception:
+    except OSError:
         return False

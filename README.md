@@ -83,7 +83,7 @@ Open http://127.0.0.1:8000 in your browser. Press Ctrl+C to stop.
 3. Try entering `5` in **Derangements** — you get exact `D(5) = 44`, ratio `44/120 = 0.3667`, comparison to limit `1/e ≈ 0.3679`, and an inclusion-exclusion partition chart!
 4. **Port in use:** Run `python web_viewer.py 8001` and navigate to http://127.0.0.1:8001.
 
-> **Security Note:** The server binds strictly to `127.0.0.1` (localhost only) and whitelists accessible paths to prevent directory traversal and public network exposure.
+> **Security Note:** The server binds strictly to `127.0.0.1` (localhost only) and serves only `index.html`, the `/plot/` charts and the `/api/` routes. API requests coming from other websites are rejected with 403.
 
 ---
 
@@ -106,8 +106,8 @@ Execute the comprehensive automated test suite:
 ```bash
 python tests.py
 ```
-**Test Result:** All **31/31 tests passed** (0 failed).  
-The suite validates known mathematical answers, boundary conditions (n=0, 0!=1), boolean type safety rejection, large integer expansion scaling, multiset partitions, recurrence sequences, history persistence, SymPy integration, REST endpoints (`/api/calc`, `/api/history`, `/api/sympy`), security whitelists, and all 14 visualizer chart routines.
+**Test Result:** All **18/18 tests passed** (0 failed).  
+The suite checks known answers and edge cases (n = 0, n = 1000), brute-force derangement counts, invalid-input rejection, recurrences, history (in a temporary file, so your real `history.txt` is never touched), SymPy checks, every chart, all `/api/calc` and `/plot` operations, and the cross-site request protection.
 
 ---
 
@@ -151,7 +151,7 @@ Web Browser (index.html)
 ```
 
 ### Key API Endpoints
-- `GET /api/calc?op=<operation>&<params>`: Evaluates operations via Python backend and returns structured JSON with exact results and step explanations.
+- `GET /api/calc?op=<operation>&<params>`: Evaluates operations via Python backend (all 14 operations) and returns JSON with the exact result.
 - `GET /plot/<operation>?<params>`: Generates and streams PNG image bytes for visual explanations.
 - `GET /api/history`: Retrieves history records from `history.txt`.
 - `POST /api/history`: Appends calculation records to `history.txt`.
@@ -169,7 +169,7 @@ PDL-Mini-Project/
 ├── visualizer.py        # Matplotlib visual explanations (14 high-resolution chart generators)
 ├── web_viewer.py        # Local Python HTTP server (serves index.html, /api/calc, /plot/ routes)
 ├── main.py              # Interactive terminal CLI menu (options 0 to 18)
-├── tests.py             # 31 automated plain-function verification unit & API tests
+├── tests.py             # 18 automated tests (maths, history, charts, HTTP API)
 ├── sympy_tools.py       # Symbolic verification and closed-form recurrence solver
 ├── history_manager.py   # Persistent calculation audit log and search engine (history.txt)
 ├── index.html           # Single-page web app (Dual-engine: Python backend + Offline JS fallback)

@@ -990,7 +990,7 @@
       </div>
     </div>
 
-    <!-- 14. HISTORY -->
+    <!-- 16. HISTORY -->
     <div id="view-history" class="view-panel">
       <div class="card">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
@@ -1025,7 +1025,7 @@
       </div>
     </div>
 
-    <!-- 15. SELF TEST -->
+    <!-- 17. SELF TEST -->
     <div id="view-tests" class="view-panel">
       <div class="card">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
@@ -1339,7 +1339,8 @@
         imgEl.style.display = "none";
         plotBox.appendChild(imgEl);
 
-        // Placement rules (Addendum E)
+        // The chart goes at the end of the result card, except for Listing and Recurrence,
+        // where it goes above the (possibly very long) list of items so it stays visible.
         if (resultCardId === "list-res") {
           const listContainer = document.getElementById("list-container");
           if (listContainer) {

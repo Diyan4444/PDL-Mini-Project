@@ -4,253 +4,100 @@
 #   Diyan Shah        - 251080020
 #   Aryan Adivarekar  - 251080008
 #   Advait Deodhar    - 251080018
-# Module: sympy_tools.py - Formal verification using SymPy symbolic mathematics
+#
+# Optional second opinion from the SymPy library on our own results.
+# SymPy is not required: without it every function returns an "install SymPy" message.
+# Functions return (verified, sympy_value, note) so callers can print the note directly.
 
-SYMPY_AVAILABLE = False
-SYMPY_VERSION = "Not installed"
+import combinatorics
+import recurrence
 
 try:
     import sympy
-    from sympy import factorial as sym_factorial
-    from sympy import binomial as sym_binomial
-    from sympy import symbols, expand, simplify, Function, rsolve
     SYMPY_AVAILABLE = True
-    SYMPY_VERSION = str(sympy.__version__)
+    SYMPY_VERSION = sympy.__version__
 except ImportError:
     SYMPY_AVAILABLE = False
     SYMPY_VERSION = "Not installed"
 
-
-def is_sympy_available():
-    """Returns True if SymPy is installed and successfully imported."""
-    return SYMPY_AVAILABLE
+INSTALL_MESSAGE = "SymPy is not installed. To enable formal symbolic verification, run: pip install sympy"
 
 
-def get_sympy_version():
-    """Returns the detected version string of SymPy or 'Not installed'."""
-    return SYMPY_VERSION
+def compare(label, sympy_value, my_value):
+    if sympy_value == my_value:
+        return True, sympy_value, f"SymPy {label} = {sympy_value} [VERIFIED MATCH]"
+    return False, sympy_value, f"Mismatch: my result = {my_value}, SymPy = {sympy_value}"
 
 
-def get_install_instructions():
-    """Returns terminal instructions for installing SymPy."""
-    return "SymPy is not installed. To enable formal symbolic verification, run: pip install sympy"
-
-
-def sympy_verify_factorial(n, my_result):
-    """Cross-verifies my factorial result against SymPy's factorial function.
-    
-    Returns a tuple: (is_verified, sympy_value, note_string).
-    """
+def verify_factorial(n, my_value):
     if not SYMPY_AVAILABLE:
-        return (False, None, get_install_instructions())
-    
-    try:
-        sym_val = int(sym_factorial(n))
-        is_match = (sym_val == my_result)
-        if is_match:
-            note = "SymPy factorial(" + str(n) + ") = " + str(sym_val) + " [VERIFIED MATCH]"
-        else:
-            note = "Mismatch: my result = " + str(my_result) + ", SymPy = " + str(sym_val)
-        return (is_match, sym_val, note)
-    except Exception as e:
-        return (False, None, "SymPy verification error: " + str(e))
+        return False, None, INSTALL_MESSAGE
+    return compare(f"factorial({n})", int(sympy.factorial(n)), my_value)
 
 
-def sympy_verify_combination(n, r, my_result):
-    """Cross-verifies my combinations result against SymPy's binomial function.
-    
-    Returns a tuple: (is_verified, sympy_value, note_string).
-    """
+def verify_combination(n, r, my_value):
     if not SYMPY_AVAILABLE:
-        return (False, None, get_install_instructions())
-    
-    try:
-        sym_val = int(sym_binomial(n, r))
-        is_match = (sym_val == my_result)
-        if is_match:
-            note = "SymPy binomial(" + str(n) + ", " + str(r) + ") = " + str(sym_val) + " [VERIFIED MATCH]"
-        else:
-            note = "Mismatch: my result = " + str(my_result) + ", SymPy = " + str(sym_val)
-        return (is_match, sym_val, note)
-    except Exception as e:
-        return (False, None, "SymPy verification error: " + str(e))
+        return False, None, INSTALL_MESSAGE
+    return compare(f"binomial({n}, {r})", int(sympy.binomial(n, r)), my_value)
 
 
-def sympy_verify_expansion(n, a, b, my_terms):
-    """Verifies my binomial expansion terms against SymPy's expand((a*x + b*y)^n).
-    
-    Constructs the expression purely from integer symbols and checks if the difference
-    simplifies to zero. Does NOT evaluate or parse arbitrary user strings.
-    
-    Returns a tuple: (is_verified, sympy_expanded_str, note_string).
-    """
+def verify_expansion(n, a, b, my_terms):
     if not SYMPY_AVAILABLE:
-        return (False, "", get_install_instructions())
-    
-    try:
-        x, y = symbols("x y")
-        # Build my expression from calculated integer tuples (coeff, x_pow, y_pow)
-        my_expr = 0
-        for coeff, x_pow, y_pow in my_terms:
-            term_sym = coeff * (x ** x_pow) * (y ** y_pow)
-            my_expr = my_expr + term_sym
-        
-        # Build theoretical expression and expand formally
-        theoretical_expr = (a * x + b * y) ** n
-        expected_expanded = expand(theoretical_expr)
-        
-        # Verify difference simplifies exactly to integer 0
-        difference = simplify(expected_expanded - my_expr)
-        is_verified = (difference == 0)
-        
-        expected_str = str(expected_expanded)
-        if is_verified:
-            note = "SymPy expand((" + str(a) + "*x + " + str(b) + "*y)^" + str(n) + ") matches my expansion. Difference = 0 [VERIFIED MATCH]"
-        else:
-            note = "Expansion difference did not simplify to 0: " + str(difference)
-        
-        return (is_verified, expected_str, note)
-    except Exception as e:
-        return (False, "", "SymPy expansion error: " + str(e))
+        return False, "", INSTALL_MESSAGE
+    x, y = sympy.symbols("x y")
+    expected = sympy.expand((a * x + b * y) ** n)
+    mine = sum(coeff * x ** xp * y ** yp for coeff, xp, yp in my_terms)
+    # The difference only expands to 0 if every coefficient matches.
+    if sympy.expand(expected - mine) == 0:
+        note = f"SymPy expand({combinatorics.binomial_label(n, a, b)}) matches my expansion. Difference = 0 [VERIFIED MATCH]"
+        return True, str(expected), note
+    return False, str(expected), "Expansion difference is not 0."
 
 
-def sympy_closed_form_recurrence(rec_type, order_k, coefficients, initial_values, my_terms):
-    """Computes symbolic closed-form solution using SymPy's rsolve for recurrences of order <= 2.
-    
-    Parameters:
-      rec_type: 'fibonacci' or 'custom'
-      order_k: Order of recurrence (1 or 2 supported for rsolve)
-      coefficients: List of k integer coefficients [c1, c2]
-      initial_values: Tuple of k integer initial values (a0, a1)
-      my_terms: List of my generated numerical terms
-      
-    Returns a tuple: (success, closed_form_str, term_check_results, note_string)
-    """
+def closed_form_recurrence(coefficients, initial_values, my_terms):
+    # Asks SymPy's rsolve for a direct formula for a(n) (for Fibonacci this is Binet's
+    # formula), then substitutes n = 0..9 and compares with the terms we generated.
     if not SYMPY_AVAILABLE:
-        return (False, "", [], get_install_instructions())
-    
-    if rec_type == "factorial":
-        note = "Factorial recurrence a(n) = n*a(n-1) has variable coefficient n. Closed-form rsolve is restricted to constant-coefficient recurrences of order <= 2."
-        return (False, "", [], note)
-    
-    if order_k > 2:
-        note = "SymPy rsolve closed-form verification is restricted to recurrences of order <= 2."
-        return (False, "", [], note)
-    
-    try:
-        n = symbols("n", integer=True)
-        f = Function("f")
-        
-        if rec_type == "fibonacci":
-            rec_eq = sympy.Eq(f(n), f(n - 1) + f(n - 2))
-            init_cond = {f(0): 0, f(1): 1}
-        elif order_k == 1:
-            c1 = coefficients[0]
-            rec_eq = sympy.Eq(f(n), c1 * f(n - 1))
-            init_cond = {f(0): initial_values[0]}
-        elif order_k == 2:
-            c1 = coefficients[0]
-            c2 = coefficients[1]
-            rec_eq = sympy.Eq(f(n), c1 * f(n - 1) + c2 * f(n - 2))
-            init_cond = {f(0): initial_values[0], f(1): initial_values[1]}
-        else:
-            return (False, "", [], "Unsupported order for rsolve.")
-        
-        sol = rsolve(rec_eq, f(n), init_cond)
-        if sol is None:
-            return (False, "", [], "SymPy rsolve could not determine a closed-form solution.")
-        
-        closed_form_str = str(sol)
-        
-        # Verify first 10 generated terms (or up to len(my_terms)) using simplify (never float ==)
-        check_count = min(10, len(my_terms))
-        term_check_results = []
-        all_matched = True
-        
-        for idx in range(check_count):
-            subbed = sol.subs(n, idx)
-            diff = simplify(subbed - my_terms[idx])
-            matched = (diff == 0)
-            if not matched:
-                all_matched = False
-            term_check_results.append({
-                "n": idx,
-                "my_term": my_terms[idx],
-                "sympy_val": str(simplify(subbed)),
-                "matched": matched
-            })
-        
-        if all_matched:
-            note = "All " + str(check_count) + " tested terms matched SymPy closed form exactly [VERIFIED MATCH]"
-        else:
-            note = "Some terms differed from SymPy closed form."
-        
-        return (True, closed_form_str, term_check_results, note)
-    except Exception as e:
-        return (False, "", [], "SymPy rsolve execution error: " + str(e))
+        return False, "", [], INSTALL_MESSAGE
+    if len(coefficients) > 2:
+        return False, "", [], "SymPy rsolve verification is limited to recurrences of order <= 2."
+    n = sympy.symbols("n", integer=True)
+    f = sympy.Function("f")
+    # rsolve expects the recurrence as an expression equal to zero:
+    # f(n) - c1*f(n-1) - c2*f(n-2), with initial values {f(0): a0, f(1): a1}.
+    relation = f(n) - sum(c * f(n - i - 1) for i, c in enumerate(coefficients))
+    solution = sympy.rsolve(relation, f(n), {f(i): v for i, v in enumerate(initial_values)})
+    if solution is None:
+        return False, "", [], "SymPy rsolve could not find a closed-form solution."
+    checks = []
+    for i, term in enumerate(my_terms[:10]):
+        # simplify turns expressions with sqrt(5) back into an exact integer before comparing.
+        value = sympy.simplify(solution.subs(n, i))
+        checks.append({"n": i, "my_term": term, "sympy_val": str(value), "matched": value == term})
+    if all(c["matched"] for c in checks):
+        note = f"All {len(checks)} tested terms matched the SymPy closed form exactly [VERIFIED MATCH]"
+    else:
+        note = "Some terms differed from the SymPy closed form."
+    return True, str(solution), checks, note
 
 
 def run_all_symbolic_checks():
-    """Runs a complete suite of formal symbolic verifications using SymPy.
-    
-    Returns a structured dictionary suitable for both CLI output and JSON API responses.
-    """
+    # Fixed set of checks shown in the web page's SymPy section (via /api/sympy).
     if not SYMPY_AVAILABLE:
-        return {
-            "available": False,
-            "version": "Not installed",
-            "message": get_install_instructions(),
-            "results": []
-        }
-
-    import combinatorics
-    import recurrence
-
-    checks = []
-
-    # 1. Factorial check
-    fact_10 = combinatorics.factorial(10)
-    ok_f, sym_f, note_f = sympy_verify_factorial(10, fact_10)
-    checks.append({
-        "name": "Factorial (10!)",
-        "verified": ok_f,
-        "detail": note_f,
-        "expression": "10! = 3,628,800"
-    })
-
-    # 2. Combinations check
-    c_10_4 = combinatorics.combinations(10, 4)
-    ok_c, sym_c, note_c = sympy_verify_combination(10, 4, c_10_4)
-    checks.append({
-        "name": "Binomial Coefficient C(10, 4)",
-        "verified": ok_c,
-        "detail": note_c,
-        "expression": "C(10, 4) = 210"
-    })
-
-    # 3. Binomial Expansion check
-    exp_terms = combinatorics.binomial_expansion_terms(3, 2, -3)
-    ok_e, sym_e, note_e = sympy_verify_expansion(3, 2, -3, exp_terms)
-    checks.append({
-        "name": "Binomial Expansion of (2x - 3y)^3",
-        "verified": ok_e,
-        "detail": note_e,
-        "expression": sym_e
-    })
-
-    # 4. Fibonacci Recurrence rsolve check
-    fib_terms = recurrence.fibonacci_sequence(10)
-    ok_r, closed_form, term_checks, note_r = sympy_closed_form_recurrence("fibonacci", 2, [1, 1], (0, 1), fib_terms)
-    checks.append({
-        "name": "Fibonacci Closed Form via rsolve() (Binet's Formula)",
-        "verified": ok_r,
-        "detail": note_r,
-        "expression": "F(n) = " + closed_form
-    })
-
+        return {"available": False, "version": SYMPY_VERSION, "message": INSTALL_MESSAGE, "results": []}
+    ok_f, _, note_f = verify_factorial(10, combinatorics.factorial(10))
+    ok_c, _, note_c = verify_combination(10, 4, combinatorics.combinations(10, 4))
+    ok_e, expanded, note_e = verify_expansion(3, 2, -3, combinatorics.binomial_expansion_terms(3, 2, -3))
+    ok_r, closed, checks, note_r = closed_form_recurrence([1, 1], (0, 1), recurrence.fibonacci_sequence(10))
+    results = [
+        ("Factorial (10!)", ok_f, note_f, "10! = 3,628,800"),
+        ("Binomial Coefficient C(10, 4)", ok_c, note_c, "C(10, 4) = 210"),
+        ("Binomial Expansion of (2x - 3y)^3", ok_e, note_e, expanded),
+        ("Fibonacci Closed Form via rsolve() (Binet's Formula)", ok_r and all(c["matched"] for c in checks), note_r, "F(n) = " + closed),
+    ]
     return {
         "available": True,
         "version": SYMPY_VERSION,
         "message": f"SymPy {SYMPY_VERSION} formal symbolic verification active.",
-        "results": checks
+        "results": [{"name": a, "verified": b, "detail": c, "expression": d} for a, b, c, d in results],
     }

@@ -4,1294 +4,583 @@
 #   Diyan Shah        - 251080020
 #   Aryan Adivarekar  - 251080008
 #   Advait Deodhar    - 251080018
-# Module: visualizer.py - Visual explanation charts using matplotlib
+#
+# Matplotlib charts that explain each result visually.
+# Every plot_* function either saves a PNG into plots/ and returns its path (used by the CLI),
+# or returns the PNG bytes when called with as_bytes=True (used by the web server).
+# If matplotlib is not installed they all return None and the rest of the app keeps working.
 
 import os
 import io
 import math
 import datetime
 import threading
+import functools
 
-# Thread lock to guarantee thread-safe matplotlib figure generation
-PLOT_LOCK = threading.RLock()
-
-# Check matplotlib availability with graceful degradation
-MATPLOTLIB_AVAILABLE = False
-MATPLOTLIB_VERSION = "Not installed"
-
-try:
-    import matplotlib
-    # Headless-safe: use Agg non-interactive backend before importing pyplot
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    import matplotlib.patches as patches
-    MATPLOTLIB_AVAILABLE = True
-    MATPLOTLIB_VERSION = str(matplotlib.__version__)
-except ImportError:
-    MATPLOTLIB_AVAILABLE = False
-    MATPLOTLIB_VERSION = "Not installed"
-
-# Import core combinatorics and recurrence to retrieve verified numbers (never re-implement maths)
 import combinatorics
 import recurrence
 
+try:
+    import matplotlib
+    # "Agg" draws straight to image files without opening a window, so it also works
+    # inside the web server. It must be selected before pyplot is imported.
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib import patches
+    MATPLOTLIB_AVAILABLE = True
+except ImportError:
+    MATPLOTLIB_AVAILABLE = False
 
-# =============================================================================
-# AVAILABILITY & CONFIGURATION HELPERS
-# =============================================================================
+# pyplot is not thread-safe and the web server handles requests on several threads,
+# so only one chart is drawn at a time.
+PLOT_LOCK = threading.Lock()
+PLOTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plots")
 
-def is_matplotlib_available():
-    """Returns True if matplotlib is installed and successfully imported."""
-    return MATPLOTLIB_AVAILABLE
-
-
-def is_visualizer_available():
-    """Alias for is_matplotlib_available."""
-    return MATPLOTLIB_AVAILABLE
-
-
-def get_matplotlib_install_message():
-    """Returns installation instruction string if matplotlib is missing."""
-    return "Matplotlib is not installed. To enable visual explanation charts, run: pip install matplotlib"
-
-
-# =============================================================================
-# PRIVATE UTILITY HELPERS
-# =============================================================================
-
-def is_strict_int(val):
-    return isinstance(val, int) and not isinstance(val, bool)
-
-
-def safe_log10(val):
-    """Safely calculates log10 for arbitrarily large integers.
-    
-    Returns 0.0 if val <= 0, otherwise math.log10(val).
-    Python's math.log10 accepts arbitrarily large ints directly.
-    """
-    if not isinstance(val, int) and not isinstance(val, float):
-        return 0.0
-    if val <= 0:
-        return 0.0
-    try:
-        return math.log10(val)
-    except Exception:
-        # Fallback if extremely large
-        return float(len(str(val)) - 1)
+# Colours mean the same thing on every chart: blue = ordered (permutations),
+# green = unordered (combinations), orange = the value the user chose, red = negative.
+BLUE = "#1f77b4"
+GREEN = "#2ca02c"
+ORANGE = "#ff7f0e"
+GRAY = "#94a3b8"
+RED = "#d62728"
+DARK = "#0f172a"
+MUTED = "#475569"
+BOLD = {"fontsize": 10, "fontweight": "bold"}
+TITLE = {"fontsize": 11, "fontweight": "bold"}
 
 
-def make_plots_folder():
-    """Returns absolute path to plots/ directory located alongside this module, creating it if needed."""
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    plots_dir = os.path.join(base_dir, "plots")
-    if not os.path.exists(plots_dir):
-        os.makedirs(plots_dir, exist_ok=True)
-    return plots_dir
+def log10(value):
+    # Most charts use a log10 scale because counts like 1000! have thousands of digits.
+    # math.log10 accepts huge ints directly (no float overflow). A count of 0 is drawn as 0.
+    return math.log10(value) if value > 0 else 0.0
 
 
-def build_filename(prefix):
-    """Generates a timestamped PNG file path inside the plots/ folder."""
-    plots_dir = make_plots_folder()
-    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:19]
-    filename = prefix + "_" + ts + ".png"
-    return os.path.join(plots_dir, filename)
+def sample_k(n, highlight=None, limit=25):
+    # k values for a bar chart over 0..n. For large n, about `limit` evenly spaced values
+    # are used so bars stay readable; n itself and the highlighted value are always kept.
+    if n <= limit:
+        return list(range(n + 1))
+    values = set(range(0, n + 1, n // limit)) | {n}
+    if highlight is not None:
+        values.add(highlight)
+    return sorted(values)
 
 
-def add_caption(fig, text):
-    """Adds a clear, one-sentence plain-English caption at the bottom of the figure."""
-    fig.text(0.5, 0.02, text, ha="center", va="bottom", fontsize=8.5, style="italic", color="#334155", wrap=True)
+def bars(ax, labels, values, colors, xlabel=None, ylabel=None, title=None, width=0.6):
+    ax.bar([str(v) for v in labels], values, color=colors, width=width, edgecolor=DARK, linewidth=0.5)
+    if xlabel:
+        ax.set_xlabel(xlabel, **BOLD)
+    if ylabel:
+        ax.set_ylabel(ylabel, **BOLD)
+    if title:
+        ax.set_title(title, **TITLE)
+    ax.grid(axis="y", linestyle="--", alpha=0.5)
 
 
-def figure_to_png_bytes(fig):
-    """Saves a matplotlib figure into an in-memory PNG buffer and returns the raw bytes.
-    
-    Closes the figure to free resources.
-    """
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=120)
-    plt.close(fig)
-    return buf.getvalue()
+def box(ax, x, y, w, h, face, edge, lw=1.5, pad=0.08):
+    ax.add_patch(patches.FancyBboxPatch((x, y), w, h, boxstyle=f"round,pad={pad}", facecolor=face, edgecolor=edge, linewidth=lw))
 
 
-def save_or_return_figure(fig, prefix, as_bytes=False):
-    """Saves figure to disk if as_bytes is False, or returns PNG bytes if True."""
-    if as_bytes:
-        return figure_to_png_bytes(fig)
-    filepath = build_filename(prefix)
-    fig.savefig(filepath, dpi=120)
-    plt.close(fig)
-    return filepath
+def message(ax, title, text, edge=BLUE):
+    ax.axis("off")
+    ax.set_title(title, pad=12, **TITLE)
+    ax.text(0.5, 0.5, text, ha="center", va="center", fontsize=11, fontweight="bold",
+            bbox=dict(boxstyle="round,pad=0.6", facecolor="#eff6ff", edgecolor=edge))
 
 
+def chart(func):
+    # Decorator shared by every plot_* function. The plot function only builds the figure
+    # and returns (figure, caption); this wrapper handles the rest: the matplotlib check,
+    # the lock, the caption, the layout, saving or returning the PNG, and always closing
+    # the figure so memory is freed even if saving fails.
+    @functools.wraps(func)
+    def wrapper(*args, as_bytes=False, **kwargs):
+        if not MATPLOTLIB_AVAILABLE:
+            return None
+        with PLOT_LOCK:
+            fig, caption = func(*args, **kwargs)
+            fig.text(0.5, 0.02, "What you are looking at: " + caption, ha="center", va="bottom",
+                     fontsize=8.5, style="italic", color="#334155", wrap=True)
+            # Keep the bottom 5% free so the caption does not overlap the axis labels.
+            fig.tight_layout(rect=(0, 0.05, 1, 1))
+            try:
+                if as_bytes:
+                    buffer = io.BytesIO()
+                    fig.savefig(buffer, format="png", dpi=120)
+                    return buffer.getvalue()
+                os.makedirs(PLOTS_DIR, exist_ok=True)
+                stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                path = os.path.join(PLOTS_DIR, f"{func.__name__}_{stamp}.png")
+                fig.savefig(path, dpi=120)
+                return path
+            finally:
+                plt.close(fig)
+    return wrapper
 
-# Color palette: Color-blind friendly and semantically consistent across all charts
-# Blue: Permutations / Ordered selections
-# Green: Combinations / Unordered selections
-# Orange: Highlighted / Chosen target value
-# Gray/Slate: Neutral bars / Background components
-# Red: Negative signed terms
-CLR_PERM = "#1f77b4"       # Blue (Ordered / Permutations)
-CLR_COMB = "#2ca02c"       # Green (Unordered / Combinations)
-CLR_HIGHLIGHT = "#ff7f0e"  # Orange (Selected target value)
-CLR_NEUTRAL = "#94a3b8"    # Slate Gray
-CLR_NEGATIVE = "#d62728"   # Red (Negative expansion coefficients)
 
+@chart
+def plot_factorial(n):
+    value = combinatorics.factorial(n)
+    ks = sample_k(n)
+    logs = [log10(math.factorial(k)) for k in ks]
 
-# =============================================================================
-# 12 OPERATION VISUALIZERS
-# =============================================================================
-
-def plot_factorial(n, as_bytes=False):
-    """Visualizes factorial growth and multiplication chain for n!.
-    
-    Displays a log10 scale bar chart of k! for k = 0..n to show super-exponential
-    growth, and for small n (<= 8) includes a multiplication chain strip.
-    """
-    if not is_matplotlib_available():
-        return None
-    if not is_strict_int(n):
-        raise TypeError("Factorial argument must be an integer.")
-    if n < 0 or n > 1000:
-        raise ValueError("n must satisfy 0 <= n <= 1000.")
-
-    target_val = combinatorics.factorial(n)
-    digit_count = len(str(target_val))
-
-    # Sample k points if n > 30 so bars remain legible
-    if n <= 30:
-        k_values = list(range(n + 1))
-        sample_note = ""
+    # Small n also gets a "x 1 = 1, x 2 = 2, x 3 = 6 ..." multiplication strip above the bars.
+    if n <= 8:
+        fig, (ax_chain, ax) = plt.subplots(2, 1, figsize=(8.5, 6.5), gridspec_kw={"height_ratios": [1, 2]})
+        ax_chain.axis("off")
+        ax_chain.set_xlim(-0.5, max(1, n) + 0.5)
+        ax_chain.set_ylim(0, 3)
+        ax_chain.set_title(f"Multiplication Chain for {n}!", pad=8, **TITLE)
+        if n == 0:
+            ax_chain.text(0.5, 1.5, "0! = 1 (exactly 1 empty arrangement)", ha="center", va="center", fontsize=11,
+                          fontweight="bold", bbox=dict(boxstyle="round,pad=0.5", facecolor="#e2e8f0", edgecolor="#64748b"))
+        running = 1
+        for i in range(1, n + 1):
+            running *= i
+            x = i - 0.5
+            box(ax_chain, x - 0.35, 0.8, 0.7, 1.4, "#eff6ff", BLUE, pad=0.1)
+            ax_chain.text(x, 1.7, f"x {i}", ha="center", va="center", **BOLD)
+            ax_chain.text(x, 1.1, f"= {running}", ha="center", va="center", fontsize=8.5, color="#334155")
     else:
-        step = max(1, n // 25)
-        k_values = list(range(0, n, step))
-        if n not in k_values:
-            k_values.append(n)
-        sample_note = " (Sampled " + str(len(k_values)) + " representative points for clarity)"
+        fig, ax = plt.subplots(figsize=(8.5, 5.5))
 
-    log_vals = [safe_log10(combinatorics.factorial(k)) for k in k_values]
-
-    with PLOT_LOCK:
-        if n <= 8:
-            fig, (ax_chain, ax_bar) = plt.subplots(2, 1, figsize=(8.5, 6.5), gridspec_kw={"height_ratios": [1, 2]})
-            
-            # Panel 1: Multiplication Chain Strip
-            ax_chain.set_xlim(-0.5, max(1, n) + 0.5)
-            ax_chain.set_ylim(0, 3)
-            ax_chain.axis("off")
-            ax_chain.set_title("Multiplication Chain for " + str(n) + "!", fontsize=11, fontweight="bold", pad=8)
-
-            if n == 0:
-                ax_chain.text(0.5, 1.5, "0! = 1 (Defined as 1: exactly 1 empty arrangement)", 
-                              ha="center", va="center", fontsize=11, fontweight="bold",
-                              bbox=dict(boxstyle="round,pad=0.5", facecolor="#e2e8f0", edgecolor="#64748b"))
-            else:
-                running_prod = 1
-                for idx in range(1, n + 1):
-                    running_prod = running_prod * idx
-                    x_pos = idx - 0.5
-                    rect = patches.FancyBboxPatch((x_pos - 0.35, 0.8), 0.7, 1.4, boxstyle="round,pad=0.1",
-                                                  facecolor="#eff6ff", edgecolor=CLR_PERM, linewidth=1.5)
-                    ax_chain.add_patch(rect)
-                    ax_chain.text(x_pos, 1.7, "x " + str(idx), ha="center", va="center", fontsize=10, fontweight="bold")
-                    ax_chain.text(x_pos, 1.1, "= " + str(running_prod), ha="center", va="center", fontsize=8.5, color="#334155")
-                    if idx < n:
-                        ax_chain.annotate("", xy=(x_pos + 0.45, 1.5), xytext=(x_pos + 0.35, 1.5),
-                                          arrowprops=dict(arrowstyle="->", color="#64748b", lw=1.2))
-        else:
-            fig, ax_bar = plt.subplots(figsize=(8.5, 5.5))
-
-        # Panel 2: Bar chart on log10 axis
-        colors = [CLR_HIGHLIGHT if k == n else CLR_PERM for k in k_values]
-        bars = ax_bar.bar([str(k) for k in k_values], log_vals, color=colors, width=0.65, edgecolor="#1e293b", linewidth=0.5)
-        
-        ax_bar.set_xlabel("Integer k", fontsize=10, fontweight="bold")
-        ax_bar.set_ylabel("log10( k! )", fontsize=10, fontweight="bold")
-        ax_bar.set_title("Super-Exponential Growth of Factorials (k = 0 to " + str(n) + ")" + sample_note, fontsize=11, fontweight="bold")
-        ax_bar.grid(axis="y", linestyle="--", alpha=0.5)
-
-        # Annotate n! bar with its digit count
-        last_bar = bars[-1]
-        ax_bar.annotate(str(digit_count) + " digits\n(log10 ~ " + str(round(log_vals[-1], 1)) + ")",
-                        xy=(last_bar.get_x() + last_bar.get_width() / 2, last_bar.get_height()),
-                        xytext=(0, 6), textcoords="offset points", ha="center", va="bottom",
-                        fontsize=8.5, fontweight="bold", color="#b45309",
-                        bbox=dict(boxstyle="round,pad=0.2", facecolor="#fef3c7", edgecolor="#d97706", alpha=0.9))
-
-        caption = "What you are looking at: Factorial values grow super-exponentially; each integer multiplies the prior total, causing rapid digit explosion."
-        add_caption(fig, caption)
-        fig.tight_layout()
-        fig.subplots_adjust(bottom=0.10)
-
-        return save_or_return_figure(fig, "plot_01_factorial", as_bytes=as_bytes)
+    colors = [ORANGE if k == n else BLUE for k in ks]
+    bars(ax, ks, logs, colors, "Integer k", "log10( k! )", f"Super-Exponential Growth of Factorials (k = 0 to {n})", 0.65)
+    last = ax.patches[-1]
+    ax.annotate(f"{len(str(value))} digits", xy=(last.get_x() + last.get_width() / 2, last.get_height()),
+                xytext=(0, 6), textcoords="offset points", ha="center", fontsize=8.5, fontweight="bold", color="#b45309")
+    return fig, "each integer multiplies the previous total, so factorials grow super-exponentially."
 
 
-def plot_permutations(n, r, as_bytes=False):
-    """Visualizes permutations P(n, r) with a slots diagram and distribution curve.
-    
-    Shows r sequential choice slots labelled with remaining choices, demonstrating
-    why P(n, r) = n * (n - 1) * ... * (n - r + 1).
-    """
-    if not is_matplotlib_available():
-        return None
-    if not is_strict_int(n) or not is_strict_int(r):
-        raise TypeError("n and r must both be integers.")
-    if n < 0 or r < 0 or r > n or n > 1000:
-        raise ValueError("Requires 0 <= r <= n <= 1000.")
-
-    fig, (ax_slots, ax_bar) = plt.subplots(2, 1, figsize=(9.0, 7.0), gridspec_kw={"height_ratios": [1.1, 1.8]})
-
-    # Subplot 1: Sequential Choice Slots Diagram
+@chart
+def plot_permutations(n, r):
+    # Called only to validate n and r: raises ValueError if r > n.
+    combinatorics.permutations(n, r)
+    fig, (ax_slots, ax) = plt.subplots(2, 1, figsize=(9.0, 7.0), gridspec_kw={"height_ratios": [1.1, 1.8]})
     ax_slots.axis("off")
-    ax_slots.set_title("Choice Slots Diagram for P(" + str(n) + ", " + str(r) + ")", fontsize=11, fontweight="bold", pad=8)
+    ax_slots.set_title(f"Choice Slots Diagram for P({n}, {r})", pad=8, **TITLE)
 
     if r == 0:
-        rect = patches.FancyBboxPatch((0.2, 0.3), 0.6, 0.4, boxstyle="round,pad=0.1",
-                                      facecolor="#f1f5f9", edgecolor=CLR_PERM, linewidth=1.5)
-        ax_slots.add_patch(rect)
-        ax_slots.text(0.5, 0.5, "0 slots to fill: exactly 1 empty arrangement [P(n, 0) = 1]",
-                      ha="center", va="center", fontsize=10, fontweight="bold", color="#1e293b")
+        ax_slots.text(0.5, 0.5, "0 slots to fill: exactly 1 empty arrangement [P(n, 0) = 1]", ha="center", va="center", **BOLD)
     else:
-        # If r <= 8, display all slots. If r > 8, display first 4 and last 2 with ellipsis
-        if r <= 8:
-            slot_indices = list(range(1, r + 1))
-            display_slots = [(i, n - i + 1) for i in slot_indices]
-            has_ellipsis = False
-        else:
-            display_slots = [(1, n), (2, n - 1), (3, n - 2), (4, n - 3), (-1, -1), (r - 1, n - r + 2), (r, n - r + 1)]
-            has_ellipsis = True
-
-        total_boxes = len(display_slots)
-        box_width = 0.8
-        gap = 0.25
-        total_width = total_boxes * box_width + (total_boxes - 1) * gap
-        start_x = -total_width / 2.0
-
-        running_val = 1
-        for idx, (slot_num, choices) in enumerate(display_slots):
-            curr_x = start_x + idx * (box_width + gap)
-            if slot_num == -1:
-                # Ellipsis box
-                ax_slots.text(curr_x + box_width / 2.0, 0.5, ". . .", ha="center", va="center", fontsize=14, fontweight="bold")
-            else:
-                running_val = running_val * choices
-                rect = patches.FancyBboxPatch((curr_x, 0.1), box_width, 0.8, boxstyle="round,pad=0.08",
-                                              facecolor="#eff6ff", edgecolor=CLR_PERM, linewidth=1.5)
-                ax_slots.add_patch(rect)
-                ax_slots.text(curr_x + box_width / 2.0, 0.72, "Slot " + str(slot_num), ha="center", va="center",
-                              fontsize=8, color="#64748b", fontweight="bold")
-                ax_slots.text(curr_x + box_width / 2.0, 0.48, str(choices) + " choices", ha="center", va="center",
-                              fontsize=9.5, fontweight="bold", color="#0f172a")
-                if not has_ellipsis or idx < 4:
-                    ax_slots.text(curr_x + box_width / 2.0, 0.22, "Running: " + str(running_val), ha="center", va="center",
-                                  fontsize=7.5, color="#1e3a8a")
-
-        ax_slots.set_xlim(-total_width / 2.0 - 0.5, total_width / 2.0 + 0.5)
+        # One box per slot showing how many choices are left. With more than 8 slots,
+        # show the first four, "..." (None), then the last two.
+        slots = list(range(1, r + 1)) if r <= 8 else [1, 2, 3, 4, None, r - 1, r]
+        width, gap = 0.8, 0.25
+        total = len(slots) * width + (len(slots) - 1) * gap
+        running = 1
+        for idx, slot in enumerate(slots):
+            x = -total / 2 + idx * (width + gap)
+            centre = x + width / 2
+            if slot is None:
+                ax_slots.text(centre, 0.5, ". . .", ha="center", va="center", fontsize=14, fontweight="bold")
+                continue
+            choices = n - slot + 1
+            running *= choices
+            box(ax_slots, x, 0.1, width, 0.8, "#eff6ff", BLUE)
+            ax_slots.text(centre, 0.72, f"Slot {slot}", ha="center", va="center", fontsize=8, color="#64748b", fontweight="bold")
+            ax_slots.text(centre, 0.48, f"{choices} choices", ha="center", va="center", fontsize=9.5, fontweight="bold")
+            if r <= 8:
+                ax_slots.text(centre, 0.22, f"Running: {running}", ha="center", va="center", fontsize=7.5, color="#1e3a8a")
+        ax_slots.set_xlim(-total / 2 - 0.5, total / 2 + 0.5)
         ax_slots.set_ylim(-0.2, 1.2)
 
-    # Subplot 2: Bar chart of P(n, k) for k = 0..n
-    if n <= 25:
-        k_range = list(range(n + 1))
-    else:
-        step = max(1, n // 25)
-        k_range = list(range(0, n + 1, step))
-        if r not in k_range:
-            k_range.append(r)
-        k_range.sort()
-
-    log_p_vals = [safe_log10(combinatorics.permutations(n, k)) for k in k_range]
-    bar_colors = [CLR_HIGHLIGHT if k == r else CLR_PERM for k in k_range]
-    
-    ax_bar.bar([str(k) for k in k_range], log_p_vals, color=bar_colors, width=0.65, edgecolor="#1e293b", linewidth=0.5)
-    ax_bar.set_xlabel("Selection Size k", fontsize=10, fontweight="bold")
-    ax_bar.set_ylabel("log10( P(n, k) )", fontsize=10, fontweight="bold")
-    ax_bar.set_title("Permutations P(" + str(n) + ", k) across k in [0, " + str(n) + "] (Orange = chosen r=" + str(r) + ")",
-                     fontsize=11, fontweight="bold")
-    ax_bar.grid(axis="y", linestyle="--", alpha=0.5)
-
-    caption = "What you are looking at: Each sequential slot has one fewer available choice because items cannot be reused; the total is the product of remaining choices."
-    add_caption(fig, caption)
-    fig.tight_layout()
-    fig.subplots_adjust(bottom=0.09)
-
-    return save_or_return_figure(fig, "plot_02_permutations", as_bytes=as_bytes)
+    ks = sample_k(n, r)
+    bars(ax, ks, [log10(math.perm(n, k)) for k in ks], [ORANGE if k == r else BLUE for k in ks],
+         "Selection Size k", "log10( P(n, k) )", f"P({n}, k) for k = 0..{n} (orange = chosen r = {r})", 0.65)
+    return fig, "each slot has one fewer choice because items cannot be reused; the total is the product of the choices."
 
 
-def plot_combinations(n, r, as_bytes=False):
-    """Visualizes combinations C(n, r) with symmetric distribution and the subset collapse effect.
-    
-    Highlights C(n, r) within the symmetric bell curve of binomial coefficients,
-    and for n <= 6 displays how r! permutations collapse into a single combination set.
-    """
-    if not is_matplotlib_available():
-        return None
-    if not is_strict_int(n) or not is_strict_int(r):
-        raise TypeError("n and r must both be integers.")
-    if n < 0 or r < 0 or r > n or n > 1000:
-        raise ValueError("Requires 0 <= r <= n <= 1000.")
-
+@chart
+def plot_combinations(n, r):
+    # Called only to validate n and r. Small inputs get a second panel showing how
+    # the r! orderings of one group collapse into a single combination.
+    combinatorics.combinations(n, r)
     if n <= 6 and r >= 1:
-        fig, (ax_bar, ax_collapse) = plt.subplots(1, 2, figsize=(10.0, 5.2), gridspec_kw={"width_ratios": [1.2, 1.0]})
+        fig, (ax, ax_collapse) = plt.subplots(1, 2, figsize=(10.0, 5.2), gridspec_kw={"width_ratios": [1.2, 1.0]})
     else:
-        fig, ax_bar = plt.subplots(figsize=(8.5, 5.2))
+        fig, ax = plt.subplots(figsize=(8.5, 5.2))
         ax_collapse = None
 
-    # Bar chart of C(n, k) for k = 0..n
-    if n <= 30:
-        k_range = list(range(n + 1))
-    else:
-        step = max(1, n // 25)
-        k_range = list(range(0, n + 1, step))
-        if r not in k_range:
-            k_range.append(r)
-        k_range.sort()
+    ks = sample_k(n, r)
+    bars(ax, ks, [log10(math.comb(n, k)) for k in ks], [ORANGE if k == r else GREEN for k in ks],
+         "Subset Size k", "log10( C(n, k) )", f"Combinations C({n}, k) [Symmetric Bell Shape]", 0.65)
+    if n == 0:
+        ax.set_ylim(0, 1)
 
-    log_c_vals = [safe_log10(combinatorics.combinations(n, k)) for k in k_range]
-    bar_colors = [CLR_HIGHLIGHT if k == r else CLR_COMB for k in k_range]
-
-    max_c_log = max(log_c_vals) if log_c_vals else 0.0
-    if max_c_log == 0.0:
-        ax_bar.set_ylim(0, 1.0)
-
-    ax_bar.bar([str(k) for k in k_range], log_c_vals, color=bar_colors, width=0.65, edgecolor="#1e293b", linewidth=0.5)
-    ax_bar.set_xlabel("Subset Size k", fontsize=10, fontweight="bold")
-    ax_bar.set_ylabel("log10( C(n, k) )", fontsize=10, fontweight="bold")
-    ax_bar.set_title("Combinations C(" + str(n) + ", k) [Symmetric Bell Distribution]", fontsize=11, fontweight="bold")
-    ax_bar.grid(axis="y", linestyle="--", alpha=0.5)
-
-    # Collapse demonstration for small inputs
     if ax_collapse is not None:
+        letters = combinatorics.LETTERS[:r]
+        orderings = ["".join(p) for p in combinatorics.list_letter_permutations(r, r)[0]]
         ax_collapse.axis("off")
-        sample_chars = list("ABCDEF"[:r])
-        perms_list, theo_p, _ = combinatorics.list_letter_permutations(r, r)
-        perm_strings = ["".join(tup) for tup in perms_list]
-
-        ax_collapse.set_title("The 'Collapse' Effect: P / r! = C", fontsize=11, fontweight="bold", pad=8)
-        
-        # Draw outer combination bounding box
-        outer_box = patches.FancyBboxPatch((0.05, 0.08), 0.90, 0.84, boxstyle="round,pad=0.05",
-                                           facecolor="#f0fdf4", edgecolor=CLR_COMB, linewidth=2.0)
-        ax_collapse.add_patch(outer_box)
-        ax_collapse.text(0.5, 0.84, "ONE COMBINATION SET", ha="center", va="center",
-                         fontsize=10, fontweight="bold", color="#166534")
-        ax_collapse.text(0.5, 0.75, "{" + ", ".join(sample_chars) + "}", ha="center", va="center",
-                         fontsize=12, fontweight="bold", color="#0f172a")
-
-        # Inner orderings display
-        ax_collapse.text(0.5, 0.63, "Contains all " + str(r) + "! = " + str(theo_p) + " ordered permutations:",
-                         ha="center", va="center", fontsize=8.5, color="#475569")
-        
-        inner_txt = ",  ".join(perm_strings[:12])
-        if len(perm_strings) > 12:
-            inner_txt += "\n... + " + str(len(perm_strings) - 12) + " more"
-        
-        ax_collapse.text(0.5, 0.40, inner_txt, ha="center", va="center", fontsize=9.5,
-                         fontfamily="monospace", color="#1e293b",
-                         bbox=dict(boxstyle="round,pad=0.4", facecolor="#ffffff", edgecolor="#cbd5e1"))
-
-        ax_collapse.text(0.5, 0.16, "Dividing by " + str(r) + "! cancels these redundant orderings.",
-                         ha="center", va="center", fontsize=8.5, style="italic", color="#166534")
-
-    caption = "What you are looking at: Combinations ignore arrangement sequence; dividing P(n, r) by r! collapses every cluster of r! orderings into exactly one subset."
-    add_caption(fig, caption)
-    fig.tight_layout()
-    fig.subplots_adjust(bottom=0.09)
-
-    return save_or_return_figure(fig, "plot_03_combinations", as_bytes=as_bytes)
+        ax_collapse.set_title("The 'Collapse' Effect: P / r! = C", pad=8, **TITLE)
+        box(ax_collapse, 0.05, 0.08, 0.90, 0.84, "#f0fdf4", GREEN, lw=2.0, pad=0.05)
+        ax_collapse.text(0.5, 0.84, "ONE COMBINATION SET", ha="center", va="center", fontsize=10, fontweight="bold", color="#166534")
+        ax_collapse.text(0.5, 0.75, "{" + ", ".join(letters) + "}", ha="center", va="center", fontsize=12, fontweight="bold")
+        ax_collapse.text(0.5, 0.63, f"Contains all {r}! = {len(orderings)} orderings:", ha="center", va="center", fontsize=8.5, color=MUTED)
+        shown = ",  ".join(orderings[:12]) + (f"\n... + {len(orderings) - 12} more" if len(orderings) > 12 else "")
+        ax_collapse.text(0.5, 0.40, shown, ha="center", va="center", fontsize=9.5, fontfamily="monospace",
+                         bbox=dict(boxstyle="round,pad=0.4", facecolor="white", edgecolor="#cbd5e1"))
+        ax_collapse.text(0.5, 0.16, f"Dividing by {r}! cancels these repeated orderings.", ha="center", va="center",
+                         fontsize=8.5, style="italic", color="#166534")
+    return fig, "combinations ignore order; dividing P(n, r) by r! collapses every group of r! orderings into one subset."
 
 
-def plot_comparison(n, r, as_bytes=False):
-    """Visualizes the exact mathematical relation P(n, r) = C(n, r) * r!.
-    
-    Shows grouped bars of P(n, k) versus C(n, k) and three decomposition bars
-    verifying the identity.
-    """
-    if not is_matplotlib_available():
-        return None
-    if not is_strict_int(n) or not is_strict_int(r):
-        raise TypeError("n and r must both be integers.")
-    if n < 0 or r < 0 or r > n or n > 1000:
-        raise ValueError("Requires 0 <= r <= n <= 1000.")
+@chart
+def plot_comparison(n, r):
+    p, c, rf = combinatorics.permutations(n, r), combinatorics.combinations(n, r), math.factorial(r)
+    fig, (ax, ax_decomp) = plt.subplots(1, 2, figsize=(10.5, 5.2), gridspec_kw={"width_ratios": [1.4, 1.0]})
 
-    p_val = combinatorics.permutations(n, r)
-    c_val = combinatorics.combinations(n, r)
-    r_fact = combinatorics.factorial(r)
-    is_valid = (p_val == c_val * r_fact)
+    # Left: P(n, k) and C(n, k) side by side for each k. Right: the three numbers in P = C * r!.
+    ks = list(range(min(n, 15) + 1))
+    w = 0.38
+    ax.bar([k - w / 2 for k in ks], [log10(math.perm(n, k)) for k in ks], width=w, label="P(n, k) [Ordered]", color=BLUE, edgecolor=DARK, linewidth=0.5)
+    ax.bar([k + w / 2 for k in ks], [log10(math.comb(n, k)) for k in ks], width=w, label="C(n, k) [Unordered]", color=GREEN, edgecolor=DARK, linewidth=0.5)
+    ax.set_xticks(ks)
+    ax.set_xlabel("Selection Size k", **BOLD)
+    ax.set_ylabel("log10( Count )", **BOLD)
+    ax.set_title(f"Permutations vs Combinations (n = {n})", **TITLE)
+    ax.legend(loc="upper left", fontsize=9)
+    ax.grid(axis="y", linestyle="--", alpha=0.5)
 
-    fig, (ax_curve, ax_decomp) = plt.subplots(1, 2, figsize=(10.5, 5.2), gridspec_kw={"width_ratios": [1.4, 1.0]})
-
-    # Grouped comparison bars for k = 0..min(n, 15)
-    sample_limit = min(n, 15)
-    k_range = list(range(sample_limit + 1))
-    p_logs = [safe_log10(combinatorics.permutations(n, k)) for k in k_range]
-    c_logs = [safe_log10(combinatorics.combinations(n, k)) for k in k_range]
-
-    x_indices = list(range(len(k_range)))
-    bar_w = 0.38
-    x_p = [x - bar_w / 2 for x in x_indices]
-    x_c = [x + bar_w / 2 for x in x_indices]
-
-    ax_curve.bar(x_p, p_logs, width=bar_w, label="P(n, k) [Ordered]", color=CLR_PERM, edgecolor="#0f172a", linewidth=0.5)
-    ax_curve.bar(x_c, c_logs, width=bar_w, label="C(n, k) [Unordered]", color=CLR_COMB, edgecolor="#0f172a", linewidth=0.5)
-    
-    ax_curve.set_xticks(x_indices)
-    ax_curve.set_xticklabels([str(k) for k in k_range])
-    ax_curve.set_xlabel("Selection Size k", fontsize=10, fontweight="bold")
-    ax_curve.set_ylabel("log10( Count )", fontsize=10, fontweight="bold")
-    ax_curve.set_title("Permutations vs Combinations (n = " + str(n) + ")", fontsize=11, fontweight="bold")
-    ax_curve.legend(loc="upper left", fontsize=9)
-    ax_curve.grid(axis="y", linestyle="--", alpha=0.5)
-
-    # Panel 2: Three decomposition bars for chosen (n, r)
-    log_c = safe_log10(c_val)
-    log_rf = safe_log10(r_fact)
-    log_p = safe_log10(p_val)
-
-    decomp_labels = ["C(" + str(n) + "," + str(r) + ")", str(r) + "!", "P(" + str(n) + "," + str(r) + ")"]
-    decomp_vals = [log_c, log_rf, log_p]
-    decomp_colors = [CLR_COMB, CLR_NEUTRAL, CLR_PERM]
-
-    max_decomp = max(decomp_vals) if decomp_vals else 0.0
-    if max_decomp == 0.0:
-        ax_decomp.set_ylim(0, 1.0)
-
-    ax_decomp.bar(decomp_labels, decomp_vals, color=decomp_colors, width=0.55, edgecolor="#0f172a", linewidth=0.8)
-    ax_decomp.set_ylabel("log10( Value )", fontsize=10, fontweight="bold")
-    status_str = "VERIFIED MATCH" if is_valid else "FAILED"
-    ax_decomp.set_title("P = C x r! [" + status_str + "]", fontsize=11, fontweight="bold", color="#15803d" if is_valid else "#b91c1c")
-    ax_decomp.grid(axis="y", linestyle="--", alpha=0.5)
-
-    caption = "What you are looking at: Permutations are strictly greater than combinations (except at k=0,1) by a factor of r!, reflecting the internal orderings of each subset."
-    add_caption(fig, caption)
-    fig.tight_layout()
-    fig.subplots_adjust(bottom=0.09)
-
-    return save_or_return_figure(fig, "plot_04_comparison", as_bytes=as_bytes)
+    ok = p == c * rf
+    bars(ax_decomp, [f"C({n},{r})", f"{r}!", f"P({n},{r})"], [log10(c), log10(rf), log10(p)], [GREEN, GRAY, BLUE],
+         ylabel="log10( Value )", width=0.55)
+    ax_decomp.set_title(f"P = C x r! [{'VERIFIED MATCH' if ok else 'FAILED'}]", color="#15803d" if ok else "#b91c1c", **TITLE)
+    if p == 1:
+        ax_decomp.set_ylim(0, 1)
+    return fig, "permutations exceed combinations by a factor of r!, the number of orderings inside each subset."
 
 
-def plot_perm_with_repetition(n, r, as_bytes=False):
-    """Visualizes permutations with repetition: n^r.
-    
-    Draws a branching choice tree for small inputs (n <= 4, r <= 3), or a growth
-    comparison curve between n^k and P(n, k) for larger inputs.
-    """
-    if not is_matplotlib_available():
-        return None
-    if not is_strict_int(n) or not is_strict_int(r):
-        raise TypeError("n and r must both be integers.")
-    if n < 0 or r < 0 or n > 1000 or r > 1000:
-        raise ValueError("Requires 0 <= n, r <= 1000.")
-
-    result_val = combinatorics.permutations_with_repetition(n, r)
-
-    # Choice Tree for small inputs
-    if n <= 4 and r <= 3 and n > 0 and r > 0:
+@chart
+def plot_perm_with_repetition(n, r):
+    total = combinatorics.permutations_with_repetition(n, r)
+    # Small inputs draw the full choice tree (at most 4^3 = 64 leaves);
+    # larger ones compare the growth of n^k with P(n, k) instead.
+    if 0 < n <= 4 and 0 < r <= 3:
         fig, ax = plt.subplots(figsize=(9.5, 6.0))
         ax.axis("off")
-        ax.set_title("Choice Tree: " + str(n) + "^" + str(r) + " = " + str(result_val) + " Total Leaf Sequences",
-                     fontsize=11, fontweight="bold", pad=12)
+        ax.set_title(f"Choice Tree: {n}^{r} = {total} Sequences", pad=12, **TITLE)
 
-        # Draw tree levels recursively
-        levels = r
-        total_leaves = n ** r
-        x_step = 10.0 / total_leaves
+        def position(level, index):
+            # Spread the n^level nodes of a tree level evenly across the width (0 to 10).
+            return (index + 0.5) * 10.0 / n ** level, 1.0 - level / (r + 0.5)
 
-        def get_coords(level, index, total_at_level):
-            y = 1.0 - (level / (levels + 0.5))
-            span = 10.0 / total_at_level
-            x = (index + 0.5) * span
-            return (x, y)
-
-        # Plot root
-        ax.scatter([5.0], [1.0], color="#0f172a", s=80, zorder=5)
-        ax.text(5.0, 1.04, "Start (Slot 0)", ha="center", va="bottom", fontsize=8.5, fontweight="bold")
-
-        # Build tree connections
-        for lev in range(1, levels + 1):
-            nodes_this_level = n ** lev
-            nodes_prev_level = n ** (lev - 1)
-            for parent_idx in range(nodes_prev_level):
-                px, py = get_coords(lev - 1, parent_idx, nodes_prev_level) if lev > 1 else (5.0, 1.0)
-                for child_branch in range(n):
-                    child_idx = parent_idx * n + child_branch
-                    cx, cy = get_coords(lev, child_idx, nodes_this_level)
-                    ax.plot([px, cx], [py, cy], color="#94a3b8", lw=1.2, zorder=3)
-                    node_color = CLR_HIGHLIGHT if lev == levels else CLR_PERM
-                    ax.scatter([cx], [cy], color=node_color, s=50, zorder=5)
-                    if levels <= 2 or lev <= 2:
-                        ax.text((px + cx) / 2.0, (py + cy) / 2.0 + 0.02, str(child_branch + 1),
-                                fontsize=7.5, color="#1e3a8a", ha="center")
-
+        ax.scatter([5.0], [1.0], color=DARK, s=80, zorder=5)
+        ax.text(5.0, 1.04, "Start", ha="center", va="bottom", fontsize=8.5, fontweight="bold")
+        for level in range(1, r + 1):
+            for parent in range(n ** (level - 1)):
+                px, py = position(level - 1, parent) if level > 1 else (5.0, 1.0)
+                for branch in range(n):
+                    cx, cy = position(level, parent * n + branch)
+                    ax.plot([px, cx], [py, cy], color=GRAY, lw=1.2, zorder=3)
+                    ax.scatter([cx], [cy], color=ORANGE if level == r else BLUE, s=50, zorder=5)
+                    if level <= 2:
+                        ax.text((px + cx) / 2, (py + cy) / 2 + 0.02, str(branch + 1), fontsize=7.5, color="#1e3a8a", ha="center")
         ax.set_xlim(-0.5, 10.5)
         ax.set_ylim(-0.1, 1.15)
-        ax.text(5.0, 0.0, "Every level branches into " + str(n) + " choices, giving " + str(n) + "^" + str(r) + " = " + str(result_val) + " distinct sequences.",
-                ha="center", va="center", fontsize=9, fontweight="bold", color="#0f172a")
-
+        ax.text(5.0, 0.0, f"Every level branches into {n} choices, giving {n}^{r} = {total} sequences.",
+                ha="center", va="center", fontsize=9, fontweight="bold")
     else:
-        # Comparison growth curve: n^k vs P(n, k)
         fig, ax = plt.subplots(figsize=(8.5, 5.2))
-        max_k = min(max(r, 1), 20)
-        k_vals = list(range(max_k + 1))
-        
-        rep_logs = [safe_log10(combinatorics.permutations_with_repetition(n, k)) for k in k_vals]
-        p_logs = [safe_log10(combinatorics.permutations(n, k)) if (k <= n) else 0.0 for k in k_vals]
-
-        ax.plot(k_vals, rep_logs, marker="o", color=CLR_HIGHLIGHT, lw=2.0, label="With Repetition: n^k")
+        ks = list(range(min(max(r, 1), 20) + 1))
+        ax.plot(ks, [log10(n ** k) for k in ks], marker="o", color=ORANGE, lw=2.0, label="With Repetition: n^k")
+        no_rep = [k for k in ks if k <= n]
         if n > 0:
-            valid_p_k = [k for k in k_vals if k <= n]
-            ax.plot(valid_p_k, [p_logs[k] for k in valid_p_k], marker="s", color=CLR_PERM, lw=2.0, linestyle="--", label="Without Repetition: P(n, k)")
-
-        ax.set_xlabel("Sequence Length k", fontsize=10, fontweight="bold")
-        ax.set_ylabel("log10( Permutations )", fontsize=10, fontweight="bold")
-        ax.set_title("Permutations with Repetition: n^k Growth (n = " + str(n) + ")", fontsize=11, fontweight="bold")
+            ax.plot(no_rep, [log10(math.perm(n, k)) for k in no_rep], marker="s", color=BLUE, lw=2.0, linestyle="--",
+                    label="Without Repetition: P(n, k)")
+        ax.set_xlabel("Sequence Length k", **BOLD)
+        ax.set_ylabel("log10( Count )", **BOLD)
+        ax.set_title(f"Permutations with Repetition: n^k Growth (n = {n})", **TITLE)
         ax.legend(loc="upper left", fontsize=9)
         ax.grid(True, linestyle="--", alpha=0.5)
-
-    caption = "What you are looking at: Allowing repetition maintains constant choice freedom across all slots, resulting in pure exponential n^r branching."
-    add_caption(fig, caption)
-    fig.tight_layout()
-    fig.subplots_adjust(bottom=0.09)
-
-    return save_or_return_figure(fig, "plot_05_perm_repetition", as_bytes=as_bytes)
+    return fig, "with repetition every slot keeps all n choices, so the count grows as n^r."
 
 
-def plot_comb_with_repetition(n, r, as_bytes=False):
-    """Visualizes combinations with repetition via Stars and Bars theorem.
-    
-    Draws a symbolic arrangement of r stars and (n - 1) dividing bars,
-    illustrating how selections map to multi-compartment partitions.
-    """
-    if not is_matplotlib_available():
-        return None
-    if not is_strict_int(n) or not is_strict_int(r):
-        raise TypeError("n and r must both be integers.")
-    if n < 0 or r < 0 or n > 1000 or r > 1000:
-        raise ValueError("Requires 0 <= n, r <= 1000.")
-
-    total_count = combinatorics.combinations_with_repetition(n, r)
-
+@chart
+def plot_comb_with_repetition(n, r):
+    total = combinatorics.combinations_with_repetition(n, r)
     fig, ax = plt.subplots(figsize=(9.5, 5.5))
-    ax.axis("off")
-
-    # Edge cases
     if n == 0 or r == 0:
-        ax.set_title("Combinations with Repetition: Edge Case (n = " + str(n) + ", r = " + str(r) + ")",
-                     fontsize=11, fontweight="bold", pad=12)
-        if n == 0 and r == 0:
-            msg = "n = 0, r = 0: Exactly 1 empty selection [Result = 1]."
-        elif n == 0:
-            msg = "n = 0 types available: Impossible to select " + str(r) + " items [Result = 0]."
-        else:
-            msg = "r = 0 items selected from " + str(n) + " types: Exactly 1 empty selection [Result = 1]."
-        
-        ax.text(0.5, 0.5, msg, ha="center", va="center", fontsize=12, fontweight="bold",
-                bbox=dict(boxstyle="round,pad=0.6", facecolor="#eff6ff", edgecolor=CLR_COMB))
-    else:
-        # Standard Stars and Bars visual
-        total_symbols = n + r - 1
-        ax.set_title("Stars & Bars Model: C(" + str(n) + " + " + str(r) + " - 1, " + str(r) + ") = C(" + str(total_symbols) + ", " + str(r) + ") = " + str(total_count),
-                     fontsize=11, fontweight="bold", pad=12)
+        message(ax, f"Combinations with Repetition: Edge Case (n = {n}, r = {r})",
+                f"n = {n}, r = {r}: result = {total}", GREEN)
+        return fig, "with no types or no items to choose there is only the empty selection (or none at all)."
 
-        # Illustrate 3 sample distributions of r stars across n bins
-        # Sample 1: Evenly spread
-        # Sample 2: Concentrated in first bin
-        # Sample 3: Alternating
-        samples = []
-        # Construct sample 1
-        b1 = [0] * n
-        for i in range(r):
-            b1[i % n] += 1
-        samples.append(("Distributed Sample", b1))
+    ax.axis("off")
+    ax.set_title(f"Stars & Bars: C({n} + {r} - 1, {r}) = C({n + r - 1}, {r}) = {total}", pad=12, **TITLE)
+    # Three example ways to split r items among n types, each drawn as stars and bars,
+    # e.g. counts [2, 1, 2] become "**|*|**". "spread" shares the items out as evenly as possible.
+    spread = [r // n + (1 if i < r % n else 0) for i in range(n)]
+    samples = [("Distributed Sample", spread), ("All in Type 1", [r] + [0] * (n - 1))]
+    if n > 1:
+        samples.append((f"All in Type {n}", [0] * (n - 1) + [r]))
 
-        # Construct sample 2
-        b2 = [0] * n
-        b2[0] = r
-        samples.append(("All in Type 1", b2))
-
-        # Construct sample 3
-        b3 = [0] * n
-        if n > 1:
-            b3[-1] = r
-            samples.append(("All in Type " + str(n), b3))
-
-        y_positions = [0.72, 0.44, 0.16]
-        for s_idx, (s_label, bin_counts) in enumerate(samples[:3]):
-            y_base = y_positions[s_idx]
-            ax.text(0.02, y_base + 0.12, s_label + ":", fontsize=9.5, fontweight="bold", color="#1e3a8a")
-            
-            # Draw stars and bars sequence
-            symbol_sequence = []
-            for b_idx in range(n):
-                for _ in range(bin_counts[b_idx]):
-                    symbol_sequence.append("*")
-                if b_idx < n - 1:
-                    symbol_sequence.append("|")
-            
-            # Render visually
-            x_cursor = 0.05
-            for sym in symbol_sequence[:25]:
-                if sym == "*":
-                    # Draw star circle
-                    circle = patches.Circle((x_cursor, y_base), 0.028, facecolor=CLR_COMB, edgecolor="#14532d", zorder=4)
-                    ax.add_patch(circle)
-                    x_cursor += 0.038
-                else:
-                    # Draw bar line
-                    ax.plot([x_cursor, x_cursor], [y_base - 0.05, y_base + 0.05], color="#0f172a", lw=2.5, zorder=5)
-                    x_cursor += 0.038
-
-            if len(symbol_sequence) > 25:
-                ax.text(x_cursor + 0.02, y_base, "... +" + str(len(symbol_sequence) - 25) + " symbols",
-                        fontsize=8.5, color="#64748b", va="center")
-
-            # Label bin breakdown text
-            breakdown_str = " [" + ", ".join(["T" + str(i + 1) + ":" + str(c) for i, c in enumerate(bin_counts)]) + "]"
-            ax.text(0.72, y_base, breakdown_str, fontsize=8.5, color="#334155", va="center", fontfamily="monospace")
-
-        ax.set_xlim(0, 1.0)
-        ax.set_ylim(0, 1.0)
-
-    caption = "What you are looking at: Stars represent items and bars represent dividers between types; choosing positions for r stars among r+n-1 slots yields C(n+r-1, r)."
-    add_caption(fig, caption)
-    fig.tight_layout()
-    fig.subplots_adjust(bottom=0.09)
-
-    return save_or_return_figure(fig, "plot_06_comb_repetition", as_bytes=as_bytes)
+    for y, (label, counts) in zip([0.72, 0.44, 0.16], samples):
+        ax.text(0.02, y + 0.12, label + ":", fontsize=9.5, fontweight="bold", color="#1e3a8a")
+        symbols = "|".join("*" * c for c in counts)
+        x = 0.05
+        for s in symbols[:25]:
+            if s == "*":
+                ax.add_patch(patches.Circle((x, y), 0.028, facecolor=GREEN, edgecolor="#14532d", zorder=4))
+            else:
+                ax.plot([x, x], [y - 0.05, y + 0.05], color=DARK, lw=2.5, zorder=5)
+            x += 0.038
+        if len(symbols) > 25:
+            ax.text(x + 0.02, y, f"... +{len(symbols) - 25} symbols", fontsize=8.5, color="#64748b", va="center")
+        breakdown = ", ".join(f"T{i + 1}:{c}" for i, c in enumerate(counts))
+        ax.text(0.72, y, f"[{breakdown[:40]}{'...' if len(breakdown) > 40 else ''}]", fontsize=8.5, va="center", fontfamily="monospace")
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    return fig, "stars are items and bars separate the types; placing r stars among n + r - 1 positions gives C(n + r - 1, r)."
 
 
-def plot_multiset(text, as_bytes=False):
-    """Visualizes multiset permutations: n! / (n1! * n2! * ... * nk!).
-    
-    Displays character frequency counts and the mathematical breakdown comparing
-    total unconstrained permutations n! against character divisor factorials.
-    """
-    if not is_matplotlib_available():
-        return None
-    if not isinstance(text, str):
-        raise TypeError("Input text must be a string.")
-    if len(text) > 50:
-        raise ValueError("Multiset input text must be at most 50 characters.")
-
-    total_count, freq = combinatorics.multiset_arrangements_count(text)
-
+@chart
+def plot_multiset(text):
+    total, freq = combinatorics.multiset_arrangements_count(text)
+    chars = sorted(freq)
     fig, (ax_freq, ax_formula) = plt.subplots(1, 2, figsize=(10.0, 5.2), gridspec_kw={"width_ratios": [1.1, 1.2]})
 
-    # Subplot 1: Character Frequencies
-    chars = sorted(list(freq.keys()))
-    counts = [freq[c] for c in chars]
-    
-    ax_freq.bar(chars, counts, color=CLR_PERM, width=0.6, edgecolor="#0f172a", linewidth=0.6)
-    ax_freq.set_xlabel("Unique Character", fontsize=10, fontweight="bold")
-    ax_freq.set_ylabel("Frequency Count", fontsize=10, fontweight="bold")
-    ax_freq.set_title("Frequencies in '" + text[:20] + ("..." if len(text) > 20 else "") + "' (Length=" + str(len(text)) + ")",
-                      fontsize=11, fontweight="bold")
-    ax_freq.grid(axis="y", linestyle="--", alpha=0.5)
+    short = text[:20] + ("..." if len(text) > 20 else "")
+    bars(ax_freq, chars, [freq[c] for c in chars], BLUE, "Unique Character", "Frequency Count",
+         f"Frequencies in '{short}' (Length={len(text)})")
+    for i, c in enumerate(chars):
+        ax_freq.text(i, freq[c] + 0.1, str(freq[c]), ha="center", va="bottom", fontsize=9, fontweight="bold")
 
-    for idx, c in enumerate(counts):
-        ax_freq.text(idx, c + 0.1, str(c), ha="center", va="bottom", fontsize=9, fontweight="bold")
-
-    # Subplot 2: Formula Breakdown on log10 axis
     labels = ["Total n!"] + [c + "!" for c in chars] + ["Result"]
-    vals = [safe_log10(combinatorics.factorial(len(text)))]
-    for c in chars:
-        vals.append(safe_log10(combinatorics.factorial(freq[c])))
-    vals.append(safe_log10(total_count))
-
-    bar_colors = [CLR_NEUTRAL] + ["#cbd5e1"] * len(chars) + [CLR_HIGHLIGHT]
-
-    ax_formula.bar(labels, vals, color=bar_colors, width=0.6, edgecolor="#0f172a", linewidth=0.6)
-    ax_formula.set_ylabel("log10( Value )", fontsize=10, fontweight="bold")
-    ax_formula.set_title("Formula Decomposition: n! / Product(ni!)", fontsize=11, fontweight="bold")
-    ax_formula.grid(axis="y", linestyle="--", alpha=0.5)
-
-    caption = "What you are looking at: Repeated identical letters are indistinguishable; dividing n! by the factorial of each letter's count cancels overcounting."
-    add_caption(fig, caption)
-    fig.tight_layout()
-    fig.subplots_adjust(bottom=0.09)
-
-    return save_or_return_figure(fig, "plot_07_multiset", as_bytes=as_bytes)
+    values = [log10(math.factorial(len(text)))] + [log10(math.factorial(freq[c])) for c in chars] + [log10(total)]
+    bars(ax_formula, labels, values, [GRAY] + ["#cbd5e1"] * len(chars) + [ORANGE], ylabel="log10( Value )",
+         title="Formula: n! / Product(ni!)")
+    return fig, "identical letters are interchangeable, so dividing n! by each letter count's factorial removes the overcounting."
 
 
-def plot_listing(mode, n=4, r=2, text="", as_bytes=False):
-    """Visualizes exhaustive listing of arrangements/groups with set uniqueness verification.
-    
-    Draws a visual tile grid of generated arrangements and compares theoretical formula,
-    enumerated list, and unique set counts.
-    """
-    if not is_matplotlib_available():
-        return None
-
+@chart
+def plot_listing(mode, n=4, r=2, text=""):
     if mode == "perm":
-        items, theo, is_match = combinatorics.list_letter_permutations(n, r)
-        title_label = "Permutations P(" + str(n) + ", " + str(r) + ")"
+        items, expected, ok = combinatorics.list_letter_permutations(n, r)
+        title = f"Permutations P({n}, {r})"
     elif mode == "comb":
-        items, theo, is_match = combinatorics.list_letter_combinations(n, r)
-        title_label = "Combinations C(" + str(n) + ", " + str(r) + ")"
+        items, expected, ok = combinatorics.list_letter_combinations(n, r)
+        title = f"Combinations C({n}, {r})"
     elif mode == "multiset":
-        items, theo, is_match = combinatorics.list_multiset_permutations(text)
-        title_label = "Multiset Arrangements of '" + text + "'"
+        items, expected, ok = combinatorics.list_multiset_permutations(text)
+        title = f"Multiset Arrangements of '{text}'"
     else:
-        raise ValueError("Invalid listing mode: " + str(mode))
+        raise ValueError(f"Invalid listing mode: {mode}")
 
-    fig, (ax_bar, ax_grid) = plt.subplots(1, 2, figsize=(10.5, 5.5), gridspec_kw={"width_ratios": [1.0, 1.8]})
+    fig, (ax, ax_grid) = plt.subplots(1, 2, figsize=(10.5, 5.5), gridspec_kw={"width_ratios": [1.0, 1.8]})
+    counts = [expected, len(items), len(set(items))]
+    bars(ax, ["Formula", "List Items", "Unique Set"], counts, [BLUE, GREEN, ORANGE], ylabel="Count", width=0.55)
+    ax.set_title(f"Verification: [{'MATCH' if ok else 'MISMATCH'}]", color="#15803d" if ok else "#b91c1c", **TITLE)
+    for i, c in enumerate(counts):
+        ax.text(i, c, str(c), ha="center", va="bottom", fontsize=9.5, fontweight="bold")
 
-    # Subplot 1: Three Count Bars (Theoretical, Generated List, Unique Set)
-    actual_count = len(items)
-    unique_count = len(set(items))
-    count_labels = ["Formula", "List Items", "Unique Set"]
-    counts = [theo, actual_count, unique_count]
-    colors = [CLR_PERM, CLR_COMB, CLR_HIGHLIGHT]
-
-    ax_bar.bar(count_labels, counts, color=colors, width=0.55, edgecolor="#0f172a", linewidth=0.6)
-    ax_bar.set_ylabel("Arrangement Count", fontsize=10, fontweight="bold")
-    match_str = "MATCH" if is_match else "MISMATCH"
-    ax_bar.set_title("Verification: [" + match_str + "]", fontsize=11, fontweight="bold",
-                     color="#15803d" if is_match else "#b91c1c")
-    ax_bar.grid(axis="y", linestyle="--", alpha=0.5)
-
-    for idx, c in enumerate(counts):
-        ax_bar.text(idx, c + 0.1, str(c), ha="center", va="bottom", fontsize=9.5, fontweight="bold")
-
-    # Subplot 2: Tile Grid of Arrangements
+    # Draw up to 120 arrangements as small tiles in a grid.
     ax_grid.axis("off")
-    ax_grid.set_title(title_label + " (Tiles Display)", fontsize=11, fontweight="bold", pad=8)
-
-    max_display = min(len(items), 120)
-    cols = 8 if max_display > 40 else 6
-    rows = math.ceil(max_display / cols) if cols > 0 else 1
-
-    tile_w = 0.90 / cols
-    tile_h = 0.85 / max(rows, 1)
-
-    for i in range(max_display):
-        row_idx = i // cols
-        col_idx = i % cols
-        x = 0.05 + col_idx * (tile_w + 0.01)
-        y = 0.90 - (row_idx + 1) * (tile_h + 0.01)
-        
-        rect = patches.FancyBboxPatch((x, y), tile_w, tile_h, boxstyle="round,pad=0.01",
-                                      facecolor="#f8fafc", edgecolor="#94a3b8", linewidth=0.8)
-        ax_grid.add_patch(rect)
-        item_str = "".join(items[i])
-        ax_grid.text(x + tile_w / 2.0, y + tile_h / 2.0, item_str, ha="center", va="center",
-                     fontsize=7.5, fontfamily="monospace", fontweight="bold", color="#1e293b")
-
-    if len(items) > max_display:
-        ax_grid.text(0.5, 0.02, "+ " + str(len(items) - max_display) + " more items generated...",
-                     ha="center", va="bottom", fontsize=9, style="italic", color="#475569")
-
-    caption = "What you are looking at: Every concrete arrangement is gathered in a tuple; converting tuples into a set confirms uniqueness and validates the formula."
-    add_caption(fig, caption)
-    fig.tight_layout()
-    fig.subplots_adjust(bottom=0.09)
-
-    return save_or_return_figure(fig, "plot_08_listing", as_bytes=as_bytes)
+    ax_grid.set_title(title, pad=8, **TITLE)
+    shown = items[:120]
+    cols = 8 if len(shown) > 40 else 6
+    rows = max(1, math.ceil(len(shown) / cols))
+    tw, th = 0.90 / cols, 0.85 / rows
+    for i, item in enumerate(shown):
+        x = 0.05 + (i % cols) * (tw + 0.01)
+        y = 0.90 - (i // cols + 1) * (th + 0.01)
+        box(ax_grid, x, y, tw, th, "#f8fafc", GRAY, lw=0.8, pad=0.01)
+        ax_grid.text(x + tw / 2, y + th / 2, "".join(item), ha="center", va="center", fontsize=7.5,
+                     fontfamily="monospace", fontweight="bold")
+    if len(items) > len(shown):
+        ax_grid.text(0.5, 0.02, f"+ {len(items) - len(shown)} more items...", ha="center", fontsize=9, style="italic", color=MUTED)
+    return fig, "every arrangement is stored as a tuple; putting them in a set proves they are all unique and match the formula."
 
 
-def plot_binomial_identities(n, r, as_bytes=False):
-    """Visualizes the three core binomial identities for chosen (n, r).
-    
-    Panels: (a) Symmetry reflection C(n, r) = C(n, n - r),
-    (b) Pascal's additive rule C(n, r) = C(n-1, r-1) + C(n-1, r),
-    (c) Row sum identity Sum C(n, k) = 2^n.
-    """
-    if not is_matplotlib_available():
-        return None
-    if not is_strict_int(n) or not is_strict_int(r):
-        raise TypeError("n and r must both be integers.")
-    if n < 0 or r < 0 or r > n or n > 1000:
-        raise ValueError("Requires 0 <= r <= n <= 1000.")
-
+@chart
+def plot_binomial_identities(n, r):
     rep = combinatorics.verify_binomial_identities(n, r)
-
     fig, (ax_sym, ax_pascal, ax_sum) = plt.subplots(3, 1, figsize=(9.5, 8.5))
 
-    # Panel A: Symmetry
-    k_range = list(range(min(n, 20) + 1))
-    c_vals = [safe_log10(combinatorics.combinations(min(n, 20), k)) for k in k_range]
-    sym_colors = [CLR_HIGHLIGHT if (k == r or k == (min(n, 20) - r)) else CLR_COMB for k in k_range]
+    # Highlight both C(n, r) and its mirror C(n, n - r) to show the symmetry.
+    ks = sorted(set(sample_k(n, r)) | {n - r})
+    bars(ax_sym, ks, [log10(math.comb(n, k)) for k in ks], [ORANGE if k in (r, n - r) else GREEN for k in ks], ylabel="log10( C )")
+    ax_sym.set_title(f"1. Symmetry: C({n}, {r}) = C({n}, {n - r}) [VERIFIED]", color="#15803d", **TITLE)
 
-    ax_sym.bar([str(k) for k in k_range], c_vals, color=sym_colors, width=0.6, edgecolor="#0f172a", linewidth=0.5)
-    ax_sym.set_ylabel("log10( C )", fontsize=8.5, fontweight="bold")
-    ax_sym.set_title("1. Symmetry: C(" + str(n) + ", " + str(r) + ") = C(" + str(n) + ", " + str(n - r) + ") [VERIFIED]",
-                     fontsize=10.5, fontweight="bold", color="#15803d")
-    ax_sym.grid(axis="y", linestyle="--", alpha=0.5)
-
-    # Panel B: Pascal's Identity
     if rep["pascal_applicable"]:
-        p1 = combinatorics.combinations(n - 1, r - 1)
-        p2 = combinatorics.combinations(n - 1, r)
-        p_target = rep["c_nr"]
-        p_labels = ["C(" + str(n-1) + "," + str(r-1) + ")", "C(" + str(n-1) + "," + str(r) + ")", "Sum = C(" + str(n) + "," + str(r) + ")"]
-        p_vals = [safe_log10(p1), safe_log10(p2), safe_log10(p_target)]
-        p_colors = [CLR_NEUTRAL, CLR_NEUTRAL, CLR_HIGHLIGHT]
-
-        ax_pascal.bar(p_labels, p_vals, color=p_colors, width=0.5, edgecolor="#0f172a", linewidth=0.5)
-        ax_pascal.set_ylabel("log10( C )", fontsize=8.5, fontweight="bold")
-        ax_pascal.set_title("2. Pascal's Rule: C(n-1, r-1) + C(n-1, r) = C(n, r) [VERIFIED]",
-                            fontsize=10.5, fontweight="bold", color="#15803d")
-        ax_pascal.grid(axis="y", linestyle="--", alpha=0.5)
+        parts = [math.comb(n - 1, r - 1), math.comb(n - 1, r), rep["c_nr"]]
+        bars(ax_pascal, [f"C({n - 1},{r - 1})", f"C({n - 1},{r})", f"Sum = C({n},{r})"], [log10(v) for v in parts],
+             [GRAY, GRAY, ORANGE], ylabel="log10( C )", width=0.5)
+        ax_pascal.set_title("2. Pascal's Rule: C(n-1, r-1) + C(n-1, r) = C(n, r) [VERIFIED]", color="#15803d", **TITLE)
     else:
         ax_pascal.axis("off")
-        ax_pascal.text(0.5, 0.5, "2. Pascal's Identity: Not applicable for boundary element r = " + str(r) + " (Applies to 1 <= r <= n-1)",
-                       ha="center", va="center", fontsize=9.5, style="italic", color="#475569",
-                       bbox=dict(boxstyle="round,pad=0.5", facecolor="#f8fafc", edgecolor="#cbd5e1"))
+        ax_pascal.text(0.5, 0.5, f"2. Pascal's Rule: not applicable for boundary r = {r} (needs 1 <= r <= n-1)",
+                       ha="center", va="center", fontsize=9.5, style="italic", color=MUTED)
 
-    # Panel C: Row Sum = 2^n
-    sum_val = rep["row_sum_value"]
-    pow2_val = rep["power_of_two"]
-    sum_labels = ["Sum_{k=0}^n C(" + str(n) + ", k)", "2^" + str(n)]
-    sum_vals = [safe_log10(sum_val), safe_log10(pow2_val)]
-
-    ax_sum.bar(sum_labels, sum_vals, color=[CLR_COMB, CLR_PERM], width=0.45, edgecolor="#0f172a", linewidth=0.5)
-    ax_sum.set_ylabel("log10( Sum )", fontsize=8.5, fontweight="bold")
-    ax_sum.set_title("3. Row Sum Identity: Sum of row " + str(n) + " equals 2^" + str(n) + " [VERIFIED]",
-                     fontsize=10.5, fontweight="bold", color="#15803d")
-    ax_sum.grid(axis="y", linestyle="--", alpha=0.5)
-
-    caption = "What you are looking at: Symmetry reflects mirror balance; Pascal's rule proves additive construction; row sum proves total subsets of an n-element set equal 2^n."
-    add_caption(fig, caption)
-    fig.tight_layout()
-    fig.subplots_adjust(bottom=0.07)
-
-    return save_or_return_figure(fig, "plot_09_identities", as_bytes=as_bytes)
+    bars(ax_sum, [f"Sum of C({n}, k)", f"2^{n}"], [log10(rep["row_sum_value"]), log10(rep["power_of_two"])], [GREEN, BLUE],
+         ylabel="log10( Sum )", width=0.45)
+    ax_sum.set_title(f"3. Row Sum: row {n} adds up to 2^{n} [VERIFIED]", color="#15803d", **TITLE)
+    return fig, "symmetry mirrors the row, Pascal's rule builds each entry by addition, and every row sums to 2^n."
 
 
-def plot_pascal_triangle(num_rows, as_bytes=False):
-    """Visualizes Pascal's triangle with cell heat-map and Sierpinski parity pattern.
-    
-    Draws a centered pyramid of cells coloured by value, annotating row sums 2^k,
-    alongside a second panel showing odd/even parity revealing the Sierpinski fractal.
-    """
-    if not is_matplotlib_available():
-        return None
-    if not is_strict_int(num_rows):
-        raise TypeError("num_rows must be an integer.")
-    if num_rows < 1 or num_rows > 15:
-        raise ValueError("num_rows must be between 1 and 15.")
-
+@chart
+def plot_pascal_triangle(num_rows):
     triangle = combinatorics.generate_pascal_triangle(num_rows)
+    fig, (ax_tri, ax_par) = plt.subplots(1, 2, figsize=(11.0, 5.8), gridspec_kw={"width_ratios": [1.4, 1.0]})
+    ax_tri.set_title(f"Pascal's Triangle (Rows 0 to {num_rows - 1})", pad=10, **TITLE)
+    ax_par.set_title("Odd / Even Pattern (Sierpinski Triangle)", pad=10, **TITLE)
 
-    fig, (ax_tri, ax_sierp) = plt.subplots(1, 2, figsize=(11.0, 5.8), gridspec_kw={"width_ratios": [1.4, 1.0]})
+    # Both panels use the same cell positions: the left shows the numbers,
+    # the right fills odd cells blue, which reveals the Sierpinski triangle pattern.
+    for i, row in enumerate(triangle):
+        y = -i * 1.05
+        ax_tri.text(num_rows * 0.55, y, f"Sum = 2^{i} = {2 ** i}", fontsize=7.5, color=MUTED, va="center")
+        for j, value in enumerate(row):
+            x = (j - i / 2) * 1.15
+            box(ax_tri, x - 0.425, y - 0.35, 0.85, 0.7, "#eff6ff", BLUE, lw=1.2)
+            ax_tri.text(x, y, str(value), ha="center", va="center", fontsize=8 if num_rows <= 8 else 6.5, fontweight="bold")
+            odd = value % 2 == 1
+            box(ax_par, x - 0.425, y - 0.35, 0.85, 0.7, BLUE if odd else "white", BLUE if odd else "#cbd5e1", lw=0.8)
 
-    # Subplot 1: Centered Pascal Triangle Cells
-    ax_tri.axis("off")
-    ax_tri.set_title("Pascal's Triangle (Rows 0 to " + str(num_rows - 1) + ")", fontsize=11, fontweight="bold", pad=10)
-
-    cell_w = 0.85
-    cell_h = 0.70
-
-    for i in range(num_rows):
-        row = triangle[i]
-        y_pos = -float(i) * 1.05
-        # Row sum annotation on right
-        ax_tri.text(float(num_rows) * 0.55, y_pos, "Sum = 2^" + str(i) + " = " + str(2 ** i),
-                    fontsize=7.5, color="#475569", va="center")
-
-        for j in range(len(row)):
-            val = row[j]
-            x_pos = (float(j) - float(i) / 2.0) * 1.15
-
-            # Highlight interior sample addition (e.g. at row 3 col 1 if rows >= 4)
-            is_sample = (num_rows >= 4 and i == 3 and j == 1)
-            cell_bg = "#fef3c7" if is_sample else "#eff6ff"
-            edge_color = CLR_HIGHLIGHT if is_sample else CLR_PERM
-
-            rect = patches.FancyBboxPatch((x_pos - cell_w / 2.0, y_pos - cell_h / 2.0), cell_w, cell_h,
-                                          boxstyle="round,pad=0.08", facecolor=cell_bg, edgecolor=edge_color, linewidth=1.2)
-            ax_tri.add_patch(rect)
-            ax_tri.text(x_pos, y_pos, str(val), ha="center", va="center", fontsize=8 if num_rows <= 8 else 6.5,
-                        fontweight="bold", color="#0f172a")
-
-    ax_tri.set_xlim(-float(num_rows) * 0.65, float(num_rows) * 0.95)
-    ax_tri.set_ylim(-float(num_rows) * 1.05 - 0.5, 0.8)
-
-    # Subplot 2: Sierpinski Gasket / Parity Pattern (val % 2)
-    ax_sierp.axis("off")
-    ax_sierp.set_title("Sierpinski Parity Fractal (mod 2)", fontsize=11, fontweight="bold", pad=10)
-
-    for i in range(num_rows):
-        row = triangle[i]
-        y_pos = -float(i) * 1.05
-        for j in range(len(row)):
-            val = row[j]
-            x_pos = (float(j) - float(i) / 2.0) * 1.15
-            is_odd = (val % 2 == 1)
-            parity_color = CLR_PERM if is_odd else "#ffffff"
-            edge_col = CLR_PERM if is_odd else "#cbd5e1"
-
-            rect = patches.FancyBboxPatch((x_pos - cell_w / 2.0, y_pos - cell_h / 2.0), cell_w, cell_h,
-                                          boxstyle="round,pad=0.08", facecolor=parity_color, edgecolor=edge_col, linewidth=0.8)
-            ax_sierp.add_patch(rect)
-
-    ax_sierp.set_xlim(-float(num_rows) * 0.65, float(num_rows) * 0.65)
-    ax_sierp.set_ylim(-float(num_rows) * 1.05 - 0.5, 0.8)
-    ax_sierp.text(0, -float(num_rows) * 1.05 - 0.2, "Blue = Odd Numbers | White = Even Numbers",
-                  ha="center", va="center", fontsize=8, fontweight="bold", color="#1e293b")
-
-    caption = "What you are looking at: Each cell is the exact sum of the two cells directly above it; coloring cells by odd/even reveals the self-similar Sierpinski triangle."
-    add_caption(fig, caption)
-    fig.tight_layout()
-    fig.subplots_adjust(bottom=0.09)
-
-    return save_or_return_figure(fig, "plot_10_pascal_triangle", as_bytes=as_bytes)
+    for ax, right in ((ax_tri, 0.95), (ax_par, 0.65)):
+        ax.axis("off")
+        ax.set_xlim(-num_rows * 0.65, num_rows * right)
+        ax.set_ylim(-num_rows * 1.05 - 0.5, 0.8)
+    ax_par.text(0, -num_rows * 1.05 - 0.2, "Blue = Odd | White = Even", ha="center", va="center", fontsize=8, fontweight="bold")
+    return fig, "each cell is the sum of the two above it; colouring odd cells reveals the Sierpinski triangle."
 
 
-def plot_recurrence(rec_type, terms_list, label="Recurrence Sequence", as_bytes=False):
-    """Visualizes recurrence sequences and convergence properties.
-    
-    Plots sequential values with markers. For Fibonacci, includes convergence of the
-    adjacent ratio F(n+1)/F(n) toward the Golden Ratio phi (~1.618).
-    """
-    if not is_matplotlib_available():
-        return None
-    if not isinstance(terms_list, list):
-        raise TypeError("terms_list must be a list of integers.")
-    if len(terms_list) == 0:
-        raise ValueError("terms_list cannot be empty.")
-
-    n_indices = list(range(len(terms_list)))
-
-    if rec_type == "fibonacci" and len(terms_list) >= 3:
-        fig, (ax_curve, ax_ratio) = plt.subplots(2, 1, figsize=(9.0, 7.0), gridspec_kw={"height_ratios": [1.4, 1.0]})
-
-        # Panel 1: Sequence terms
-        log_terms = [safe_log10(t) for t in terms_list]
-        ax_curve.plot(n_indices, log_terms, marker="o", color=CLR_PERM, lw=2.0, markersize=5)
-        ax_curve.set_ylabel("log10( F(n) )", fontsize=9.5, fontweight="bold")
-        ax_curve.set_title("Fibonacci Sequence: F(0)=0, F(1)=1, F(n) = F(n-1) + F(n-2)", fontsize=11, fontweight="bold")
-        ax_curve.grid(True, linestyle="--", alpha=0.5)
-
-        # Annotate first 5 terms
-        for i in range(min(5, len(terms_list))):
-            ax_curve.text(i, log_terms[i] + 0.1, "F(" + str(i) + ")=" + str(terms_list[i]),
-                          fontsize=7.5, color="#1e3a8a", ha="center")
-
-        # Panel 2: Golden Ratio Convergence
-        ratios = []
-        ratio_indices = []
-        for i in range(1, len(terms_list) - 1):
-            denom = terms_list[i]
-            if denom > 0:
-                # Safe ratio computation: use float safely on moderate numbers
-                numer = terms_list[i + 1]
-                ratio_val = float(numer) / float(denom)
-                ratios.append(ratio_val)
-                ratio_indices.append(i)
-
-        ax_ratio.plot(ratio_indices, ratios, marker="s", color=CLR_HIGHLIGHT, lw=1.8, label="F(n+1) / F(n)")
-        golden_ratio = (1.0 + math.sqrt(5.0)) / 2.0
-        ax_ratio.axhline(golden_ratio, color="#16a34a", linestyle="--", lw=1.5, label="Golden Ratio phi ~ 1.61803")
-        
-        ax_ratio.set_xlabel("Term Index n", fontsize=9.5, fontweight="bold")
-        ax_ratio.set_ylabel("Ratio F(n+1)/F(n)", fontsize=9.5, fontweight="bold")
-        ax_ratio.set_title("Convergence to the Golden Ratio (phi)", fontsize=10, fontweight="bold")
+@chart
+def plot_recurrence(rec_type, terms, label="Recurrence Sequence"):
+    idx = list(range(len(terms)))
+    if rec_type == "fibonacci" and len(terms) >= 3:
+        fig, (ax, ax_ratio) = plt.subplots(2, 1, figsize=(9.0, 7.0), gridspec_kw={"height_ratios": [1.4, 1.0]})
+        logs = [log10(t) for t in terms]
+        ax.plot(idx, logs, marker="o", color=BLUE, lw=2.0, markersize=5)
+        ax.set_ylabel("log10( F(n) )", **BOLD)
+        ax.set_title("Fibonacci Sequence: F(n) = F(n-1) + F(n-2)", **TITLE)
+        for i in range(min(5, len(terms))):
+            ax.text(i, logs[i] + 0.1, f"F({i})={terms[i]}", fontsize=7.5, color="#1e3a8a", ha="center")
+        # F(n+1) / F(n) approaches the golden ratio (1 + sqrt(5)) / 2.
+        ratio_idx = [i for i in range(1, len(terms) - 1) if terms[i] > 0]
+        ax_ratio.plot(ratio_idx, [terms[i + 1] / terms[i] for i in ratio_idx], marker="s", color=ORANGE, lw=1.8, label="F(n+1) / F(n)")
+        ax_ratio.axhline((1 + math.sqrt(5)) / 2, color="#16a34a", linestyle="--", lw=1.5, label="Golden Ratio ~ 1.61803")
+        ax_ratio.set_xlabel("Term Index n", **BOLD)
+        ax_ratio.set_title("Convergence to the Golden Ratio", **TITLE)
         ax_ratio.set_ylim(1.0, 2.2)
         ax_ratio.legend(loc="upper right", fontsize=8.5)
         ax_ratio.grid(True, linestyle="--", alpha=0.5)
-
     else:
-        fig, ax_curve = plt.subplots(figsize=(8.5, 5.2))
-        # Decide between linear and log10 based on maximum value
-        max_val = max(abs(t) for t in terms_list)
-        use_log = (max_val > 1000000 and min(terms_list) >= 0)
-
-        if use_log:
-            y_vals = [safe_log10(t) for t in terms_list]
-            ylabel = "log10( a(n) )"
-        else:
-            y_vals = terms_list
-            ylabel = "Value a(n)"
-
-        ax_curve.plot(n_indices, y_vals, marker="o", color=CLR_PERM, lw=2.0, markersize=5)
-        ax_curve.set_xlabel("Term Index n", fontsize=10, fontweight="bold")
-        ax_curve.set_ylabel(ylabel, fontsize=10, fontweight="bold")
-        ax_curve.set_title("Recurrence Sequence: " + str(label), fontsize=11, fontweight="bold")
-        ax_curve.grid(True, linestyle="--", alpha=0.5)
-
-        for i in range(min(4, len(terms_list))):
-            ax_curve.text(i, y_vals[i], " a(" + str(i) + ")=" + str(terms_list[i]),
-                          fontsize=7.5, color="#1e3a8a", va="bottom")
-
-    caption = "What you are looking at: Recurrences build terms sequentially from previous states; adjacent ratios in linear constant recurrences converge to characteristic roots."
-    add_caption(fig, caption)
-    fig.tight_layout()
-    fig.subplots_adjust(bottom=0.09)
-
-    return save_or_return_figure(fig, "plot_11_recurrence", as_bytes=as_bytes)
+        fig, ax = plt.subplots(figsize=(8.5, 5.2))
+        # Switch to a log scale for big values, but only if none are negative (log needs > 0).
+        use_log = max(abs(t) for t in terms) > 10 ** 6 and min(terms) >= 0
+        values = [log10(t) for t in terms] if use_log else terms
+        ax.plot(idx, values, marker="o", color=BLUE, lw=2.0, markersize=5)
+        ax.set_xlabel("Term Index n", **BOLD)
+        ax.set_ylabel("log10( a(n) )" if use_log else "a(n)", **BOLD)
+        ax.set_title(f"Recurrence Sequence: {label}", **TITLE)
+        for i in range(min(4, len(terms))):
+            ax.text(i, values[i], f" a({i})={terms[i]}", fontsize=7.5, color="#1e3a8a", va="bottom")
+    ax.grid(True, linestyle="--", alpha=0.5)
+    return fig, "each term is built from the previous ones; ratios of linear recurrences settle towards a fixed root."
 
 
-def plot_binomial_expansion(n, a, b, as_bytes=False):
-    """Visualizes the algebraic expansion of (a*x + b*y)^n.
-    
-    Displays signed polynomial coefficients contrasted with the underlying
-    Pascal's triangle combinations row.
-    """
-    if not is_matplotlib_available():
-        return None
-    if not is_strict_int(n) or not is_strict_int(a) or not is_strict_int(b):
-        raise TypeError("n, a, and b must be integers.")
-    if n < 0 or n > 20 or abs(a) > 10 or abs(b) > 10:
-        raise ValueError("Requires 0 <= n <= 20 and |a|, |b| <= 10.")
-
+@chart
+def plot_binomial_expansion(n, a, b):
     terms = combinatorics.binomial_expansion_terms(n, a, b)
-    formatted_poly = combinatorics.format_binomial_expansion(terms)
+    fig, (ax, ax_pascal) = plt.subplots(1, 2, figsize=(11.0, 5.2), gridspec_kw={"width_ratios": [1.4, 1.0]})
 
-    fig, (ax_coeffs, ax_pascal) = plt.subplots(1, 2, figsize=(11.0, 5.2), gridspec_kw={"width_ratios": [1.4, 1.0]})
+    # Coefficients are converted to float only for the bar heights. The largest allowed
+    # input, (10x + 10y)^20, has coefficients around 1e25, which a float handles easily.
+    coeffs = [c for c, _, _ in terms]
+    labels = [combinatorics.term_variables(xp, yp) or "1" for _, xp, yp in terms]
+    bars(ax, labels, [float(c) for c in coeffs], [BLUE if c >= 0 else RED for c in coeffs], "Term", "Coefficient",
+         "Expansion Coefficients: " + combinatorics.binomial_label(n, a, b))
+    ax.axhline(0, color="#64748b", lw=1.0)
+    ax.tick_params(axis="x", rotation=30)
+    biggest = float(max(abs(c) for c in coeffs)) or 1.0
+    for i, c in enumerate(coeffs):
+        text = f"{c:.2e}" if len(str(abs(c))) > 7 else str(c)
+        ax.text(i, c + (0.03 if c >= 0 else -0.03) * biggest, text, ha="center", va="bottom" if c >= 0 else "top",
+                fontsize=7 if len(coeffs) > 10 else 8, fontweight="bold")
 
-    # Subplot 1: Signed Expansion Coefficients
-    term_labels = []
-    coeffs = []
-    bar_colors = []
-
-    for coeff, x_pow, y_pow in terms:
-        # Build variable label
-        parts = []
-        if x_pow > 0:
-            parts.append("x" if x_pow == 1 else "x^" + str(x_pow))
-        if y_pow > 0:
-            parts.append("y" if y_pow == 1 else "y^" + str(y_pow))
-        lbl = "*".join(parts) if parts else "1"
-        term_labels.append(lbl)
-        coeffs.append(coeff)
-        bar_colors.append(CLR_PERM if coeff >= 0 else CLR_NEGATIVE)
-
-    # Convert to floats for plotting to prevent OverflowError on huge integer coefficients
-    float_coeffs = [float(c) for c in coeffs]
-    ax_coeffs.bar(term_labels, float_coeffs, color=bar_colors, width=0.6, edgecolor="#0f172a", linewidth=0.5)
-    ax_coeffs.axhline(0, color="#64748b", lw=1.0)
-    ax_coeffs.set_xlabel("Algebraic Term", fontsize=10, fontweight="bold")
-    ax_coeffs.set_ylabel("Signed Coefficient", fontsize=10, fontweight="bold")
-    
-    # Title showing polynomial formula
-    input_str = "(" + (str(a) if a != 1 else "") + "x + " + (str(b) if b != 1 else "") + "y)^" + str(n)
-    ax_coeffs.set_title("Expansion Coefficients: " + input_str, fontsize=11, fontweight="bold")
-    ax_coeffs.tick_params(axis="x", rotation=30)
-    ax_coeffs.grid(axis="y", linestyle="--", alpha=0.5)
-
-    max_abs = max(abs(c) for c in coeffs) if coeffs else 0
-    float_max_abs = float(max_abs) if max_abs > 0 else 1.0
-
-    for idx, val in enumerate(coeffs):
-        y_val = float(val)
-        offset = (0.03 * float_max_abs) if y_val >= 0 else (-0.03 * float_max_abs)
-        if max_abs >= 1000000 or len(str(val)) > 8:
-            lbl = f"{val:.2e}"
-        else:
-            lbl = str(val)
-        ax_coeffs.text(idx, y_val + offset, lbl, ha="center", va="bottom" if y_val >= 0 else "top",
-                       fontsize=7.0 if len(coeffs) > 10 else 8.0, fontweight="bold", color="#0f172a")
-
-    # Subplot 2: Underlying Pascal Row C(n, k)
-    k_range = list(range(n + 1))
-    pascal_vals = [float(combinatorics.combinations(n, k)) for k in k_range]
-
-    ax_pascal.bar([str(k) for k in k_range], pascal_vals, color=CLR_COMB, width=0.6, edgecolor="#0f172a", linewidth=0.5)
-    ax_pascal.set_xlabel("Binomial Index k", fontsize=10, fontweight="bold")
-    ax_pascal.set_ylabel("Value C(" + str(n) + ", k)", fontsize=10, fontweight="bold")
-    ax_pascal.set_title("Underlying Pascal Row " + str(n), fontsize=11, fontweight="bold")
-    ax_pascal.grid(axis="y", linestyle="--", alpha=0.5)
-
-    caption = "What you are looking at: The Binomial Theorem scales Pascal coefficients C(n, k) by powers of a^(n-k) and b^k to form each polynomial term."
-    add_caption(fig, caption)
-    fig.tight_layout()
-    fig.subplots_adjust(bottom=0.10)
-
-    return save_or_return_figure(fig, "plot_12_expansion", as_bytes=as_bytes)
+    ks = list(range(n + 1))
+    bars(ax_pascal, ks, [math.comb(n, k) for k in ks], GREEN, "k", f"C({n}, k)", f"Pascal Row {n}")
+    return fig, "the binomial theorem scales each Pascal number C(n, k) by a^(n-k) * b^k."
 
 
-def plot_derangements(n, as_bytes=False):
-    """Visualizes derangements D(n) and the asymptotic convergence to n! / e.
-    
-    Subplot 1: Compares D(k) vs k! on a log10 scale across k = 0..n.
-    Subplot 2: Shows the ratio D(k) / k! rapidly approaching the horizontal limit line 1/e (~0.367879).
-    """
-    if not is_matplotlib_available():
-        return None
-    if not is_strict_int(n):
-        raise TypeError("n must be an integer.")
-    if n < 0 or n > 1000:
-        raise ValueError("Requires 0 <= n <= 1000.")
-
-    target_d = combinatorics.derangements(n)
-    target_f = combinatorics.factorial(n)
+@chart
+def plot_derangements(n):
+    values = combinatorics.derangements_list(n)
     ratio = combinatorics.derangements_report(n)["ratio"]
+    fig, (ax, ax_ratio) = plt.subplots(1, 2, figsize=(11.0, 5.2), gridspec_kw={"width_ratios": [1.2, 1.0]})
 
-    with PLOT_LOCK:
-        fig, (ax_growth, ax_ratio) = plt.subplots(1, 2, figsize=(11.0, 5.2), gridspec_kw={"width_ratios": [1.2, 1.0]})
+    ks = sample_k(n, limit=20)
+    pos = list(range(len(ks)))
+    w = 0.38
+    ax.bar([p + w / 2 for p in pos], [log10(math.factorial(k)) for k in ks], width=w, label="All Permutations k!", color=GRAY, edgecolor=DARK, linewidth=0.5)
+    ax.bar([p - w / 2 for p in pos], [log10(values[k]) for k in ks], width=w, label="Derangements D(k)", color=ORANGE, edgecolor=DARK, linewidth=0.5)
+    ax.set_xticks(pos)
+    ax.set_xticklabels([str(k) for k in ks])
+    ax.set_xlabel("Size k", **BOLD)
+    ax.set_ylabel("log10( Count )", **BOLD)
+    ax.set_title(f"Derangements D(k) vs k! (n = {n})", **TITLE)
+    ax.legend(loc="upper left", fontsize=8.5)
+    ax.grid(axis="y", linestyle="--", alpha=0.5)
 
-        # Subplot 1: Growth of D(k) vs k!
-        max_k = min(n, 20)
-        k_range = list(range(max_k + 1)) if n <= 25 else [k for k in range(0, n + 1, max(1, n // 20))]
-        if n not in k_range:
-            k_range.append(n)
-            k_range.sort()
-
-        d_logs = [safe_log10(combinatorics.derangements(k)) for k in k_range]
-        f_logs = [safe_log10(combinatorics.factorial(k)) for k in k_range]
-
-        x_indices = list(range(len(k_range)))
-        bar_w = 0.38
-        x_d = [x - bar_w / 2 for x in x_indices]
-        x_f = [x + bar_w / 2 for x in x_indices]
-
-        ax_growth.bar(x_f, f_logs, width=bar_w, label="All Permutations k!", color=CLR_NEUTRAL, edgecolor="#0f172a", linewidth=0.5)
-        ax_growth.bar(x_d, d_logs, width=bar_w, label="Derangements D(k)", color=CLR_HIGHLIGHT, edgecolor="#0f172a", linewidth=0.5)
-        ax_growth.set_xticks(x_indices)
-        ax_growth.set_xticklabels([str(k) for k in k_range])
-        ax_growth.set_xlabel("Input Size k", fontsize=10, fontweight="bold")
-        ax_growth.set_ylabel("log10( Count )", fontsize=10, fontweight="bold")
-        ax_growth.set_title(f"Derangements D(k) vs Total Permutations k! (Chosen n={n})", fontsize=11, fontweight="bold")
-        ax_growth.legend(loc="upper left", fontsize=8.5)
-        ax_growth.grid(axis="y", linestyle="--", alpha=0.5)
-
-        # Subplot 2: Ratio Convergence to 1/e
-        ratio_k = list(range(1, min(max(n, 7), 15) + 1))
-        ratios = [float(combinatorics.derangements(k)) / float(combinatorics.factorial(k)) for k in ratio_k]
-        inv_e = 1.0 / math.e
-
-        ax_ratio.plot(ratio_k, ratios, marker="o", color=CLR_PERM, lw=2.0, label="D(k) / k!")
-        ax_ratio.axhline(inv_e, color=CLR_NEGATIVE, linestyle="--", lw=1.8, label=f"Limit 1/e ≈ {inv_e:.4f}")
-        ax_ratio.set_xlabel("Size k", fontsize=10, fontweight="bold")
-        ax_ratio.set_ylabel("Proportion D(k) / k!", fontsize=10, fontweight="bold")
-        ax_ratio.set_title(f"Convergence to 1/e (At n={n}: {ratio:.5f})", fontsize=11, fontweight="bold")
-        ax_ratio.set_ylim(0.0, 0.6)
-        ax_ratio.legend(loc="upper right", fontsize=8.5)
-        ax_ratio.grid(True, linestyle="--", alpha=0.5)
-
-        caption = "What you are looking at: Derangements count permutations with zero fixed points; asymptotically ~36.8% (1/e) of all permutations are derangements."
-        add_caption(fig, caption)
-        fig.tight_layout()
-        fig.subplots_adjust(bottom=0.09)
-
-        return save_or_return_figure(fig, "plot_derangements", as_bytes=as_bytes)
+    # D(k) / k! reaches 1/e within a few steps, so the ratio panel only needs k up to 15.
+    small = combinatorics.derangements_list(15)
+    ratio_k = list(range(1, min(max(n, 7), 15) + 1))
+    ax_ratio.plot(ratio_k, [small[k] / math.factorial(k) for k in ratio_k], marker="o", color=BLUE, lw=2.0, label="D(k) / k!")
+    ax_ratio.axhline(1 / math.e, color=RED, linestyle="--", lw=1.8, label=f"Limit 1/e ~ {1 / math.e:.4f}")
+    ax_ratio.set_xlabel("Size k", **BOLD)
+    ax_ratio.set_ylabel("D(k) / k!", **BOLD)
+    ax_ratio.set_title(f"Convergence to 1/e (at n = {n}: {ratio:.5f})", **TITLE)
+    ax_ratio.set_ylim(0, 0.6)
+    ax_ratio.legend(loc="upper right", fontsize=8.5)
+    ax_ratio.grid(True, linestyle="--", alpha=0.5)
+    return fig, "derangements are permutations with no item in its own place; about 1/e (36.8%) of all permutations are derangements."
 
 
-def plot_circular_permutations(n, r=None, allow_reflections=False, as_bytes=False):
-    """Visualizes circular permutations and rotational equivalence.
-    
-    Draws items arranged along a circle and illustrates how rotational shifts
-    collapse into a single circular ordering.
-    """
-    if not is_matplotlib_available():
-        return None
-    if not is_strict_int(n):
-        raise TypeError("n must be an integer.")
-    if n < 0 or n > 1000:
-        raise ValueError("Requires 0 <= n <= 1000.")
-    if not isinstance(allow_reflections, bool):
-        raise TypeError("allow_reflections must be a boolean.")
+@chart
+def plot_circular_permutations(n, r=None, allow_reflections=False):
+    r = n if r is None else r
+    count = combinatorics.circular_permutations(n, r, allow_reflections)
+    fig, ax = plt.subplots(figsize=(8.5, 6.0))
+    if r == 0:
+        message(ax, f"Circular Permutations: Edge Case (n={n}, r=0)", "Exactly 1 empty circular arrangement [Result = 1]")
+        return fig, "with nothing to place there is exactly one (empty) arrangement."
 
-    target_r = n if (r is None) else r
-    if not is_strict_int(target_r) or target_r < 0 or target_r > n:
-        raise ValueError("Requires 0 <= r <= n.")
+    # Draw up to 8 labelled items evenly around a circle, starting at the top.
+    ax.axis("off")
+    shown = min(r, 8)
+    ax.add_patch(patches.Circle((0.5, 0.5), 0.32, fill=False, edgecolor="#64748b", lw=2.0, linestyle="--"))
+    for i in range(shown):
+        angle = 2 * math.pi * i / shown + math.pi / 2
+        x, y = 0.5 + 0.32 * math.cos(angle), 0.5 + 0.32 * math.sin(angle)
+        ax.add_patch(patches.Circle((x, y), 0.045, facecolor="#eff6ff", edgecolor=BLUE, lw=1.5, zorder=5))
+        ax.text(x, y, combinatorics.LETTERS[i], ha="center", va="center", fontsize=10, fontweight="bold", zorder=6)
+    divisor = f"{r} rotations" + (" x 2 reflections" if allow_reflections and r >= 3 else "")
+    ax.text(0.5, 0.54, f"Circular count = {count}", ha="center", va="center", fontsize=11, fontweight="bold", color="#1e3a8a")
+    ax.text(0.5, 0.44, f"P({n}, {r}) divided by {divisor}", ha="center", va="center", fontsize=9, color=MUTED)
+    ax.set_title(f"Circular Permutations of {r} out of {n} items = {count}", pad=10, **TITLE)
+    return fig, f"rotating a circle of {r} items gives the same arrangement, so the linear count is divided by {r}."
 
-    count = combinatorics.circular_permutations(n, r=r, allow_reflections=allow_reflections)
 
-    with PLOT_LOCK:
-        fig, ax = plt.subplots(figsize=(8.5, 6.0))
-        ax.axis("off")
-
-        if target_r == 0 or n == 0:
-            ax.set_title(f"Circular Permutations: Edge Case (n={n}, r={target_r})", fontsize=11, fontweight="bold", pad=12)
-            ax.text(0.5, 0.5, f"n = {n}, r = {target_r}: Exactly 1 empty circular arrangement [Result = 1]",
-                    ha="center", va="center", fontsize=11, fontweight="bold",
-                    bbox=dict(boxstyle="round,pad=0.6", facecolor="#eff6ff", edgecolor=CLR_PERM))
-        else:
-            disp_k = min(target_r, 8)
-            alphabet = "ABCDEFGH"
-            symbols = list(alphabet[:disp_k])
-
-            # Draw central circle
-            circ = patches.Circle((0.5, 0.5), 0.32, fill=False, edgecolor="#64748b", lw=2.0, linestyle="--")
-            ax.add_patch(circ)
-
-            # Place items along perimeter
-            for idx in range(disp_k):
-                angle = (2 * math.pi * idx) / disp_k + (math.pi / 2)
-                cx = 0.5 + 0.32 * math.cos(angle)
-                cy = 0.5 + 0.32 * math.sin(angle)
-                node = patches.Circle((cx, cy), 0.045, facecolor="#eff6ff", edgecolor=CLR_PERM, lw=1.5, zorder=5)
-                ax.add_patch(node)
-                ax.text(cx, cy, symbols[idx], ha="center", va="center", fontsize=10, fontweight="bold", color="#0f172a", zorder=6)
-
-            ax.text(0.5, 0.54, f"Circular: P_circ = {count}", ha="center", va="center", fontsize=11, fontweight="bold", color="#1e3a8a")
-            ax.text(0.5, 0.44, f"Divided by {target_r} rotations", ha="center", va="center", fontsize=9, color="#475569")
-            ax.set_title(f"Circular Permutations P_circ({n}, {target_r}) = {count}", fontsize=11, fontweight="bold", pad=10)
-
-        caption = f"What you are looking at: In a circle, rotating items by 1..{target_r} positions yields the identical cycle; dividing by {target_r} cancels rotational duplicates."
-        add_caption(fig, caption)
-        fig.tight_layout()
-        fig.subplots_adjust(bottom=0.09)
-
-        return save_or_return_figure(fig, "plot_circular", as_bytes=as_bytes)
+# Example inputs for the CLI's "Visual gallery" option, which draws one chart of each type.
+DEMO_PLOTS = [
+    ("Factorial (n=6)", plot_factorial, (6,)),
+    ("Permutations P(6, 3)", plot_permutations, (6, 3)),
+    ("Combinations C(6, 3)", plot_combinations, (6, 3)),
+    ("Comparison P vs C (6, 3)", plot_comparison, (6, 3)),
+    ("Permutations with Repetition (3^4)", plot_perm_with_repetition, (3, 4)),
+    ("Combinations with Repetition (n=4, r=3)", plot_comb_with_repetition, (4, 3)),
+    ("Multiset Arrangements ('MISSISSIPPI')", plot_multiset, ("MISSISSIPPI",)),
+    ("Listing P(4, 2)", plot_listing, ("perm", 4, 2)),
+    ("Binomial Identities (n=6, r=3)", plot_binomial_identities, (6, 3)),
+    ("Pascal's Triangle (rows=8)", plot_pascal_triangle, (8,)),
+    ("Fibonacci (10 terms)", plot_recurrence, ("fibonacci", recurrence.fibonacci_sequence(10), "Fibonacci")),
+    ("Binomial Expansion ((x+y)^5)", plot_binomial_expansion, (5, 1, 1)),
+    ("Derangements D(5)", plot_derangements, (5,)),
+    ("Circular Permutations (5, 3)", plot_circular_permutations, (5, 3)),
+]
 
 
 def generate_all_demo_plots():
-    """Generates all 12 visual explanation charts using representative demo parameters.
-    
-    Returns a list of tuples: (description, file_path).
-    """
-    if not is_matplotlib_available():
+    if not MATPLOTLIB_AVAILABLE:
         return []
-
-    created = []
-
-    p1 = plot_factorial(6)
-    if p1:
-        created.append(("1. Factorial (n=6)", p1))
-
-    p2 = plot_permutations(6, 3)
-    if p2:
-        created.append(("2. Permutations P(6, 3)", p2))
-
-    p3 = plot_combinations(6, 3)
-    if p3:
-        created.append(("3. Combinations C(6, 3)", p3))
-
-    p4 = plot_comparison(6, 3)
-    if p4:
-        created.append(("4. Comparison P vs C (6, 3)", p4))
-
-    p5 = plot_perm_with_repetition(3, 4)
-    if p5:
-        created.append(("5. Permutations with Repetition (3^4)", p5))
-
-    p6 = plot_comb_with_repetition(4, 3)
-    if p6:
-        created.append(("6. Combinations with Repetition (n=4, r=3)", p6))
-
-    p7 = plot_multiset("MISSISSIPPI")
-    if p7:
-        created.append(("7. Multiset Arrangements ('MISSISSIPPI')", p7))
-
-    p8 = plot_listing("perm", 4, 2, "")
-    if p8:
-        created.append(("8. Small Listing P(4, 2)", p8))
-
-    p9 = plot_binomial_identities(6, 3)
-    if p9:
-        created.append(("9. Binomial Identities (n=6, r=3)", p9))
-
-    p10 = plot_pascal_triangle(8)
-    if p10:
-        created.append(("10. Pascal's Triangle (rows=8)", p10))
-
-    fib_terms = recurrence.fibonacci_sequence(10)
-    p11 = plot_recurrence("fibonacci", fib_terms, "Fibonacci Sequence")
-    if p11:
-        created.append(("11. Recurrence Relation (Fibonacci 10 terms)", p11))
-
-    p12 = plot_binomial_expansion(5, 1, 1)
-    if p12:
-        created.append(("12. Binomial Expansion ((x+y)^5)", p12))
-
-    p13 = plot_derangements(5)
-    if p13:
-        created.append(("13. Derangements D(5)", p13))
-
-    p14 = plot_circular_permutations(5, 3)
-    if p14:
-        created.append(("14. Circular Permutations P_circ(5, 3)", p14))
-
-    return created
-
+    return [(name, func(*args)) for name, func, args in DEMO_PLOTS]
