@@ -9,3 +9,20 @@
 2026-11-02 07:58:18|Pascal Triangle|rows=6|Rendered 6 rows
 2026-11-02 07:58:21|Expansion|(x + y)^3|x^3 + 3*x^2*y + 3*x*y^2 + y^3
 2026-11-02 07:58:27|Fibonacci Sequence: F(n) = F(n-1) + F(n-2)|terms=10|Generated 10 terms
+2026-11-19 22:13:00|Factorial|n=5|120
+2026-11-19 22:13:11|Permutations|n=5, r=3|60
+2026-11-19 22:48:17|Factorial|n=5|120
+2026-11-19 22:48:23|Factorial|n=8|40320
+2026-11-19 22:53:59|Permutations|n=10, r=2|90
+2026-11-19 22:59:16|Permutations|n=1000, r=2|999000
+2026-11-19 22:59:30|Combinations|n=5, r=3|10
+2026-11-19 23:00:59|Combinations|n=10, r=3|120
+2026-11-19 23:02:37|Comparison|n=4, r=3|P=24, C=4
+2026-11-19 23:03:53|Perm w/ Rep|n=5, r=3|125
+2026-11-19 23:06:36|Comb w/ Rep|n=5, r=3|35
+2026-11-19 23:10:40|Multiset|text='MISSISSIPPI'|34650
+2026-11-19 23:13:04|Listing (perm)|count=12|MATCH
+2026-11-19 23:13:24|Listing (perm)|count=12|MATCH
+2026-11-19 23:13:27|Listing (comb)|count=6|MATCH
+2026-11-19 23:17:30|Identities|n=5, r=2|All verified
+2026-11-19 23:20:06|Pascal Triangle|rows=6|Rendered 6 rows

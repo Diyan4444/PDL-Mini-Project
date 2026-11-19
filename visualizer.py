@@ -856,84 +856,104 @@ def plot_binomial_identities(n, r, as_bytes=False):
     return save_or_return_figure(fig, "plot_09_identities", as_bytes=as_bytes)
 
 
+
 def plot_pascal_triangle(num_rows, as_bytes=False):
-    """Visualizes Pascal's triangle with cell heat-map and Sierpinski parity pattern.
-    
-    Draws a centered pyramid of cells coloured by value, annotating row sums 2^k,
-    alongside a second panel showing odd/even parity revealing the Sierpinski fractal.
-    """
+
+   
     if not is_matplotlib_available():
         return None
+
+   
     if not is_strict_int(num_rows):
         raise TypeError("num_rows must be an integer.")
+
     if num_rows < 1 or num_rows > 15:
         raise ValueError("num_rows must be between 1 and 15.")
 
+    
     triangle = combinatorics.generate_pascal_triangle(num_rows)
 
-    fig, (ax_tri, ax_sierp) = plt.subplots(1, 2, figsize=(11.0, 5.8), gridspec_kw={"width_ratios": [1.4, 1.0]})
+    
+    fig, ax = plt.subplots(figsize=(9.0, 6.5))
 
-    # Subplot 1: Centered Pascal Triangle Cells
-    ax_tri.axis("off")
-    ax_tri.set_title("Pascal's Triangle (Rows 0 to " + str(num_rows - 1) + ")", fontsize=11, fontweight="bold", pad=10)
+    
+    ax.axis("off")
 
+    
+    ax.set_title(
+        "Pascal's Triangle (Rows 0 to " + str(num_rows - 1) + ")",
+        fontsize=14,
+        fontweight="bold",
+        pad=15
+    )
+
+   
     cell_w = 0.85
     cell_h = 0.70
 
+    
     for i in range(num_rows):
-        row = triangle[i]
-        y_pos = -float(i) * 1.05
-        # Row sum annotation on right
-        ax_tri.text(float(num_rows) * 0.55, y_pos, "Sum = 2^" + str(i) + " = " + str(2 ** i),
-                    fontsize=7.5, color="#475569", va="center")
 
+        row = triangle[i]
+
+       
+        y_pos = -float(i) * 1.05
+
+        
         for j in range(len(row)):
+
             val = row[j]
+
+           
             x_pos = (float(j) - float(i) / 2.0) * 1.15
 
-            # Highlight interior sample addition (e.g. at row 3 col 1 if rows >= 4)
-            is_sample = (num_rows >= 4 and i == 3 and j == 1)
-            cell_bg = "#fef3c7" if is_sample else "#eff6ff"
-            edge_color = CLR_HIGHLIGHT if is_sample else CLR_PERM
+            
+            rect = patches.FancyBboxPatch(
+                (x_pos - cell_w / 2.0, y_pos - cell_h / 2.0),
+                cell_w,
+                cell_h,
+                boxstyle="round,pad=0.08",
+                facecolor="#eff6ff",
+                edgecolor=CLR_PERM,
+                linewidth=1.2
+            )
 
-            rect = patches.FancyBboxPatch((x_pos - cell_w / 2.0, y_pos - cell_h / 2.0), cell_w, cell_h,
-                                          boxstyle="round,pad=0.08", facecolor=cell_bg, edgecolor=edge_color, linewidth=1.2)
-            ax_tri.add_patch(rect)
-            ax_tri.text(x_pos, y_pos, str(val), ha="center", va="center", fontsize=8 if num_rows <= 8 else 6.5,
-                        fontweight="bold", color="#0f172a")
+            
+            ax.add_patch(rect)
 
-    ax_tri.set_xlim(-float(num_rows) * 0.65, float(num_rows) * 0.95)
-    ax_tri.set_ylim(-float(num_rows) * 1.05 - 0.5, 0.8)
+           
+            ax.text(
+                x_pos,
+                y_pos,
+                str(val),
+                ha="center",
+                va="center",
+                fontsize=9,
+                fontweight="bold",
+                color="#0f172a"
+            )
 
-    # Subplot 2: Sierpinski Gasket / Parity Pattern (val % 2)
-    ax_sierp.axis("off")
-    ax_sierp.set_title("Sierpinski Parity Fractal (mod 2)", fontsize=11, fontweight="bold", pad=10)
+    
+    ax.set_xlim(
+        -float(num_rows) * 0.65,
+        float(num_rows) * 0.65
+    )
 
-    for i in range(num_rows):
-        row = triangle[i]
-        y_pos = -float(i) * 1.05
-        for j in range(len(row)):
-            val = row[j]
-            x_pos = (float(j) - float(i) / 2.0) * 1.15
-            is_odd = (val % 2 == 1)
-            parity_color = CLR_PERM if is_odd else "#ffffff"
-            edge_col = CLR_PERM if is_odd else "#cbd5e1"
+    ax.set_ylim(
+        -float(num_rows) * 1.05 - 0.5,
+        0.8
+    )
 
-            rect = patches.FancyBboxPatch((x_pos - cell_w / 2.0, y_pos - cell_h / 2.0), cell_w, cell_h,
-                                          boxstyle="round,pad=0.08", facecolor=parity_color, edgecolor=edge_col, linewidth=0.8)
-            ax_sierp.add_patch(rect)
-
-    ax_sierp.set_xlim(-float(num_rows) * 0.65, float(num_rows) * 0.65)
-    ax_sierp.set_ylim(-float(num_rows) * 1.05 - 0.5, 0.8)
-    ax_sierp.text(0, -float(num_rows) * 1.05 - 0.2, "Blue = Odd Numbers | White = Even Numbers",
-                  ha="center", va="center", fontsize=8, fontweight="bold", color="#1e293b")
-
-    caption = "What you are looking at: Each cell is the exact sum of the two cells directly above it; coloring cells by odd/even reveals the self-similar Sierpinski triangle."
-    add_caption(fig, caption)
+    
     fig.tight_layout()
-    fig.subplots_adjust(bottom=0.09)
 
-    return save_or_return_figure(fig, "plot_10_pascal_triangle", as_bytes=as_bytes)
+    
+    return save_or_return_figure(
+        fig,
+        "plot_10_pascal_triangle",
+        as_bytes=as_bytes
+    )
+
 
 
 def plot_recurrence(rec_type, terms_list, label="Recurrence Sequence", as_bytes=False):
