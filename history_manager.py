@@ -1,13 +1,24 @@
 # Project: Combinatorial Counting and Permutation Analyzer
-# Name: [YOUR NAME]  Roll No: [YOUR ROLL NO]
+# Group Members (Name - Roll No):
+#   Dheer Chheda      - 251080019
+#   Diyan Shah        - 251080020
+#   Aryan Adivarekar  - 251080008
+#   Advait Deodhar    - 251080018
 # Module: history_manager.py - Persistent record saving, loading, and searching
 
 import os
 import datetime
 
 
-def get_history_file_path(filename="history.txt"):
-    """Returns absolute path to history.txt located alongside this module."""
+# Default history file used when no filename is passed. The test suite points this
+# at a temporary file so that running tests never touches the real history.txt.
+DEFAULT_HISTORY_FILENAME = "history.txt"
+
+
+def get_history_file_path(filename=None):
+    """Returns absolute path to the history file located alongside this module."""
+    if filename is None:
+        filename = DEFAULT_HISTORY_FILENAME
     base_dir = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base_dir, filename)
 
@@ -21,7 +32,7 @@ def sanitize_field(text):
     return cleaned.strip()
 
 
-def save_history_record(operation, inputs_str, result_str, filename="history.txt"):
+def save_history_record(operation, inputs_str, result_str, filename=None):
     """Appends one calculation record to history.txt.
     
     Record format: timestamp|operation|inputs|result
@@ -47,7 +58,7 @@ def save_history_record(operation, inputs_str, result_str, filename="history.txt
         return False
 
 
-def read_history_records(filename="history.txt"):
+def read_history_records(filename=None):
     """Reads all history records from history.txt.
     
     Handles missing file, empty file, and skips malformed lines.
@@ -86,7 +97,7 @@ def read_history_records(filename="history.txt"):
         return ([], 0)
 
 
-def search_history_records(query, filename="history.txt"):
+def search_history_records(query, filename=None):
     """Searches history records matching query in operation or inputs (case-insensitive).
     
     Returns a tuple: (matching_records, total_records_count, skipped_count).
@@ -106,7 +117,7 @@ def search_history_records(query, filename="history.txt"):
     return (matches, len(records), skipped)
 
 
-def clear_history(filename="history.txt"):
+def clear_history(filename=None):
     """Clears all records in history.txt by truncating the file."""
     file_path = get_history_file_path(filename)
     try:

@@ -1,5 +1,9 @@
 # Project: Combinatorial Counting and Permutation Analyzer
-# Name: [YOUR NAME]  Roll No: [YOUR ROLL NO]
+# Group Members (Name - Roll No):
+#   Dheer Chheda      - 251080019
+#   Diyan Shah        - 251080020
+#   Aryan Adivarekar  - 251080008
+#   Advait Deodhar    - 251080018
 # Module: tests.py - Plain-function automated verification suite
 
 import os
@@ -14,6 +18,9 @@ import sympy_tools
 import history_manager
 import visualizer
 import web_viewer
+
+# Temporary history file used for the whole test run (see run_all_tests).
+TEST_SERVER_HISTORY_FILE = "test_run_temp_server_history.txt"
 
 
 def test_factorial_known_answers():
@@ -732,6 +739,66 @@ def test_visualizer_derangements_and_circular():
     return "Visualizer Derangements and Circular Permutations chart generation"
 
 
+def test_derangements_large_n():
+    """Validates derangements beyond n = 170, where float(n!) would overflow."""
+    for n in (171, 500, 1000):
+        rep = combinatorics.derangements_report(n)
+        assert rep["derangements"] == combinatorics.derangements_inclusion_exclusion(n)
+        assert abs(rep["ratio"] - 1.0 / 2.718281828459045) < 1e-12
+    if visualizer.is_matplotlib_available():
+        png = visualizer.plot_derangements(500, as_bytes=True)
+        assert png is not None and png[:8] == b"\x89PNG\r\n\x1a\n"
+    return "Derangements for large n (171, 500, 1000) without float overflow"
+
+
+def test_api_tests_leave_real_history_untouched():
+    """Validates that the test run redirects server history writes away from history.txt."""
+    assert history_manager.DEFAULT_HISTORY_FILENAME == TEST_SERVER_HISTORY_FILE
+    assert history_manager.get_history_file_path() != history_manager.get_history_file_path("history.txt")
+    return "Test-server history writes are isolated from the real history.txt"
+
+
+def test_api_input_hardening():
+    """Validates 400 errors for bad custom recurrence / long words, and 403 for cross-site API calls."""
+    server, port = start_test_server()
+    base = f"http://127.0.0.1:{port}"
+
+    def status_of(url, method="GET", headers=None, data=None):
+        req = urllib.request.Request(url, method=method, headers=headers or {}, data=data)
+        try:
+            return urllib.request.urlopen(req).status
+        except urllib.error.HTTPError as e:
+            return e.code
+
+    try:
+        # Non-integer / out-of-range custom recurrence values -> 400 (not 500)
+        assert status_of(f"{base}/api/calc?op=recurrence&type=custom&terms=5&order=1&coeffs=a&inits=1") == 400
+        assert status_of(f"{base}/api/calc?op=recurrence&type=custom&terms=5&order=1&coeffs=5000&inits=1") == 400
+        assert status_of(f"{base}/api/calc?op=recurrence&type=custom&terms=5&order=2&coeffs=1,1&inits=0,1") == 200
+
+        # Multiset word longer than 50 characters -> 400
+        assert status_of(f"{base}/api/calc?op=multiset&word=" + "A" * 51) == 400
+        assert status_of(f"{base}/api/calc?op=multiset&word=" + "A" * 50) == 200
+
+        # Cross-site browser requests -> 403
+        evil = {"Origin": "http://evil.example", "Sec-Fetch-Site": "cross-site"}
+        assert status_of(f"{base}/api/history", method="DELETE", headers=evil) == 403
+        assert status_of(f"{base}/api/history", method="POST", headers=evil, data=b"{}") == 403
+        assert status_of(f"{base}/api/calc?op=factorial&n=5", headers=evil) == 403
+        # DNS rebinding: wrong Host header -> 403
+        assert status_of(f"{base}/api/calc?op=factorial&n=5", headers={"Host": f"evil.example:{port}"}) == 403
+        # Same-origin browser request -> allowed
+        same = {"Origin": base, "Sec-Fetch-Site": "same-origin"}
+        assert status_of(f"{base}/api/calc?op=factorial&n=5", headers=same) == 200
+        # Page and charts still load normally
+        assert status_of(f"{base}/") == 200
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    return "API input hardening (bad recurrence -> 400, long word -> 400, cross-site -> 403)"
+
+
 def run_all_tests():
     """Executes all test functions and returns a summary dictionary."""
     test_functions = [
@@ -762,9 +829,17 @@ def run_all_tests():
         test_multinomial_coefficient,
         test_api_calc_endpoints,
         test_api_history_and_sympy,
-        test_visualizer_derangements_and_circular
+        test_visualizer_derangements_and_circular,
+        test_derangements_large_n,
+        test_api_tests_leave_real_history_untouched,
+        test_api_input_hardening
     ]
-    
+
+    # Redirect every history write/clear made during the run (including by the
+    # test HTTP servers) to a temporary file so the real history.txt is untouched.
+    original_history_file = history_manager.DEFAULT_HISTORY_FILENAME
+    history_manager.DEFAULT_HISTORY_FILENAME = TEST_SERVER_HISTORY_FILE
+
     passed_count = 0
     failed_count = 0
     results = []
@@ -773,22 +848,28 @@ def run_all_tests():
     print("COMBINATORIAL COUNTING ANALYZER - AUTOMATED TEST SUITE")
     print("=" * 70)
     
-    for tf in test_functions:
-        name = tf.__name__
-        try:
-            desc = tf()
-            passed_count = passed_count + 1
-            print("[PASS] " + desc)
-            results.append({"name": name, "status": "PASS", "description": desc})
-        except AssertionError as e:
-            failed_count = failed_count + 1
-            print("[FAIL] " + name + " (AssertionError: " + str(e) + ")")
-            results.append({"name": name, "status": "FAIL", "description": str(e)})
-        except Exception as e:
-            failed_count = failed_count + 1
-            print("[FAIL] " + name + " (Exception: " + str(e) + ")")
-            results.append({"name": name, "status": "FAIL", "description": str(e)})
-    
+    try:
+        for tf in test_functions:
+            name = tf.__name__
+            try:
+                desc = tf()
+                passed_count = passed_count + 1
+                print("[PASS] " + desc)
+                results.append({"name": name, "status": "PASS", "description": desc})
+            except AssertionError as e:
+                failed_count = failed_count + 1
+                print("[FAIL] " + name + " (AssertionError: " + str(e) + ")")
+                results.append({"name": name, "status": "FAIL", "description": str(e)})
+            except Exception as e:
+                failed_count = failed_count + 1
+                print("[FAIL] " + name + " (Exception: " + str(e) + ")")
+                results.append({"name": name, "status": "FAIL", "description": str(e)})
+    finally:
+        history_manager.DEFAULT_HISTORY_FILENAME = original_history_file
+        temp_path = history_manager.get_history_file_path(TEST_SERVER_HISTORY_FILE)
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
     total = passed_count + failed_count
     print("=" * 70)
     print("TEST SUMMARY: " + str(passed_count) + "/" + str(total) + " tests passed. (" + str(failed_count) + " failed)")

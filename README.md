@@ -106,7 +106,7 @@ Execute the comprehensive automated test suite:
 ```bash
 python tests.py
 ```
-**Test Result:** All **28/28 tests passed** (0 failed).  
+**Test Result:** All **31/31 tests passed** (0 failed).  
 The suite validates known mathematical answers, boundary conditions (n=0, 0!=1), boolean type safety rejection, large integer expansion scaling, multiset partitions, recurrence sequences, history persistence, SymPy integration, REST endpoints (`/api/calc`, `/api/history`, `/api/sympy`), security whitelists, and all 14 visualizer chart routines.
 
 ---
@@ -169,7 +169,7 @@ PDL-Mini-Project/
 ├── visualizer.py        # Matplotlib visual explanations (14 high-resolution chart generators)
 ├── web_viewer.py        # Local Python HTTP server (serves index.html, /api/calc, /plot/ routes)
 ├── main.py              # Interactive terminal CLI menu (options 0 to 18)
-├── tests.py             # 28 automated plain-function verification unit & API tests
+├── tests.py             # 31 automated plain-function verification unit & API tests
 ├── sympy_tools.py       # Symbolic verification and closed-form recurrence solver
 ├── history_manager.py   # Persistent calculation audit log and search engine (history.txt)
 ├── index.html           # Single-page web app (Dual-engine: Python backend + Offline JS fallback)
@@ -205,6 +205,17 @@ PDL-Mini-Project/
 
 **Q: How do I exit the CLI?**  
 **A:** Type `0` at the main menu prompt or press `Ctrl + C`. Both terminate cleanly.
+
+---
+
+## 👥 Team Members
+
+| Name | Roll No |
+|---|---|
+| Dheer Chheda | 251080019 |
+| Diyan Shah | 251080020 |
+| Aryan Adivarekar | 251080008 |
+| Advait Deodhar | 251080018 |
 
 ---
 

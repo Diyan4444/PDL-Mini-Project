@@ -1,5 +1,9 @@
 # Project: Combinatorial Counting and Permutation Analyzer
-# Name: [YOUR NAME]  Roll No: [YOUR ROLL NO]
+# Group Members (Name - Roll No):
+#   Dheer Chheda      - 251080019
+#   Diyan Shah        - 251080020
+#   Aryan Adivarekar  - 251080008
+#   Advait Deodhar    - 251080018
 # Module: main.py - Interactive CLI interface, menu coordination, input validation, and formatting
 
 import sys

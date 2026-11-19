@@ -1,5 +1,9 @@
 # Project: Combinatorial Counting and Permutation Analyzer
-# Name: [YOUR NAME]  Roll No: [YOUR ROLL NO]
+# Group Members (Name - Roll No):
+#   Dheer Chheda      - 251080019
+#   Diyan Shah        - 251080020
+#   Aryan Adivarekar  - 251080008
+#   Advait Deodhar    - 251080018
 # Module: visualizer.py - Visual explanation charts using matplotlib
 
 import os
@@ -1110,7 +1114,7 @@ def plot_derangements(n, as_bytes=False):
 
     target_d = combinatorics.derangements(n)
     target_f = combinatorics.factorial(n)
-    ratio = float(target_d) / float(target_f) if target_f > 0 else 1.0
+    ratio = combinatorics.derangements_report(n)["ratio"]
 
     with PLOT_LOCK:
         fig, (ax_growth, ax_ratio) = plt.subplots(1, 2, figsize=(11.0, 5.2), gridspec_kw={"width_ratios": [1.2, 1.0]})

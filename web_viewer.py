@@ -1,5 +1,9 @@
 # Project: Combinatorial Counting and Permutation Analyzer
-# Name: [YOUR NAME]  Roll No: [YOUR ROLL NO]
+# Group Members (Name - Roll No):
+#   Dheer Chheda      - 251080019
+#   Diyan Shah        - 251080020
+#   Aryan Adivarekar  - 251080008
+#   Advait Deodhar    - 251080018
 # Module: web_viewer.py - Local Python HTTP server serving index.html, calculation APIs, and dynamic visualizations
 
 import os
@@ -48,6 +52,33 @@ class WebViewerHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def is_untrusted_api_request(self):
+        """Returns True if an /api/ request did not come from this app's own page.
+
+        Blocks other websites open in the same browser from calling the API
+        (e.g. writing or clearing history) and blocks DNS-rebinding attacks:
+          - Host must be this server's own localhost address.
+          - Browser-sent Sec-Fetch-Site / Origin headers, when present, must be same-origin.
+        Non-browser clients (tests, curl) send neither header and are allowed.
+        """
+        port = self.server.server_address[1]
+        allowed_hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
+        allowed_origins = {"http://" + h for h in allowed_hosts}
+
+        host = self.headers.get("Host", "")
+        if host not in allowed_hosts:
+            return True
+
+        fetch_site = self.headers.get("Sec-Fetch-Site")
+        if fetch_site is not None and fetch_site not in ("same-origin", "none"):
+            return True
+
+        origin = self.headers.get("Origin")
+        if origin is not None and origin not in allowed_origins:
+            return True
+
+        return False
+
     def do_GET(self):
         # Reject path traversal attempts immediately
         if ".." in self.path or "//" in self.path:
@@ -56,6 +87,10 @@ class WebViewerHandler(BaseHTTPRequestHandler):
 
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
+
+        if path.startswith("/api/") and self.is_untrusted_api_request():
+            self.send_plain_error(403, "Forbidden: cross-site API requests are not allowed.")
+            return
 
         # Route A: Serve main application interface (index.html)
         if path in ("/", "/index.html"):
@@ -99,8 +134,16 @@ class WebViewerHandler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
 
-        content_len = int(self.headers.get("Content-Length", 0))
-        if content_len > 100000:
+        if self.is_untrusted_api_request():
+            self.send_plain_error(403, "Forbidden: cross-site API requests are not allowed.")
+            return
+
+        try:
+            content_len = int(self.headers.get("Content-Length", 0))
+        except ValueError:
+            self.send_plain_error(400, "Invalid Content-Length header.")
+            return
+        if content_len < 0 or content_len > 100000:
             self.send_plain_error(400, "Request body too large.")
             return
 
@@ -130,6 +173,11 @@ class WebViewerHandler(BaseHTTPRequestHandler):
             return
 
         parsed = urllib.parse.urlparse(self.path)
+
+        if self.is_untrusted_api_request():
+            self.send_plain_error(403, "Forbidden: cross-site API requests are not allowed.")
+            return
+
         if parsed.path == "/api/history":
             history_manager.clear_history()
             self.send_json_response(200, {"success": True, "message": "History cleared successfully."})
@@ -670,6 +718,9 @@ class WebViewerHandler(BaseHTTPRequestHandler):
                 if not raw_word or not raw_word.isalnum():
                     self.send_json_response(400, {"success": False, "engine": "python", "error": "Word must be alphanumeric."})
                     return
+                if len(raw_word) > 50:
+                    self.send_json_response(400, {"success": False, "engine": "python", "error": "Word length cannot exceed 50 characters."})
+                    return
                 count, freq = combinatorics.multiset_arrangements_count(raw_word)
                 res_str = str(count)
                 history_manager.save_history_record("Multiset Arrangements", f"word='{raw_word}'", res_str)
@@ -800,8 +851,15 @@ class WebViewerHandler(BaseHTTPRequestHandler):
                         self.send_json_response(400, {"success": False, "engine": "python", "error": f"Expected {order} coefficients and {order} initial values."})
                         return
 
-                    coeffs_list = [int(c) for c in coeff_parts]
-                    inits_list = [int(a) for a in init_parts]
+                    try:
+                        coeffs_list = [int(c) for c in coeff_parts]
+                        inits_list = [int(a) for a in init_parts]
+                    except ValueError:
+                        self.send_json_response(400, {"success": False, "engine": "python", "error": "Coefficients and initial values must be comma-separated integers."})
+                        return
+                    if any(abs(v) > 1000 for v in coeffs_list + inits_list):
+                        self.send_json_response(400, {"success": False, "engine": "python", "error": "Coefficients and initial values must have absolute value <= 1000."})
+                        return
                     if coeffs_list[-1] == 0:
                         self.send_json_response(400, {"success": False, "engine": "python", "error": f"Trailing coefficient c{order} cannot be 0."})
                         return

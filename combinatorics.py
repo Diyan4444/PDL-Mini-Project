@@ -1,9 +1,14 @@
 # Project: Combinatorial Counting and Permutation Analyzer
-# Name: [YOUR NAME]  Roll No: [YOUR ROLL NO]
+# Group Members (Name - Roll No):
+#   Dheer Chheda      - 251080019
+#   Diyan Shah        - 251080020
+#   Aryan Adivarekar  - 251080008
+#   Advait Deodhar    - 251080018
 # Module: combinatorics.py - Core mathematical counting algorithms, identities, and listing
 
 import math
 import itertools
+from fractions import Fraction
 
 
 def is_strict_int(val):
@@ -485,7 +490,9 @@ def derangements_report(n):
     
     count = derangements(n)
     fact_n = factorial(n)
-    ratio = float(count) / float(fact_n) if fact_n > 0 else 1.0
+    # Fraction keeps the division exact; converting D(n) and n! to float
+    # separately overflows for n > 170.
+    ratio = float(Fraction(count, fact_n)) if fact_n > 0 else 1.0
     inv_e = 1.0 / math.e
     
     return {

@@ -1113,7 +1113,9 @@
     // =========================================================================
     const HIST_KEY = "combinatorics_history_log";
 
-    async function saveHistory(op, inputs, result) {
+    // serverLogged: true when /api/calc already wrote this record to history.txt,
+    // so only the local browser copy is needed (avoids duplicate lines).
+    async function saveHistory(op, inputs, result, serverLogged = false) {
       const now = new Date();
       const ts = now.toISOString().slice(0, 19).replace("T", " ");
       const rec = {
@@ -1131,7 +1133,7 @@
       } catch (e) {}
 
       // 2. Python backend history.txt persistence
-      try {
+      if (!serverLogged) try {
         fetch("/api/history", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1500,7 +1502,7 @@
         <b>Zero factorial rule:</b> 0! = 1 by definition (representing 1 unique arrangement of the empty set).
       `;
       document.getElementById("fact-res").style.display = "block";
-      saveHistory("Factorial", `n=${n}`, display);
+      saveHistory("Factorial", `n=${n}`, display, api.online);
       showPlot("fact-res", "factorial", { n: n }, `Visual explanation for ${n}!`);
     }
 
@@ -1526,7 +1528,7 @@
         <b>Meaning:</b> There are ${display} distinct ways to arrange ${r} items from ${n} items where sequence order matters.
       `;
       document.getElementById("perm-res").style.display = "block";
-      saveHistory("Permutations", `n=${n}, r=${r}`, display);
+      saveHistory("Permutations", `n=${n}, r=${r}`, display, api.online);
       showPlot("perm-res", "permutations", { n: n, r: r }, `Visual explanation for P(${n}, ${r})`);
     }
 
@@ -1552,7 +1554,7 @@
         <b>Why we divide by r!:</b> For any group of ${r} items, there exist ${r}! internal orderings that all represent the identical subset.
       `;
       document.getElementById("comb-res").style.display = "block";
-      saveHistory("Combinations", `n=${n}, r=${r}`, display);
+      saveHistory("Combinations", `n=${n}, r=${r}`, display, api.online);
       showPlot("comb-res", "combinations", { n: n, r: r }, `Visual explanation for C(${n}, ${r})`);
     }
 
@@ -2039,7 +2041,7 @@
         ${ratioText}
       `;
       document.getElementById("derange-res").style.display = "block";
-      saveHistory("Derangements", `n=${n}`, display);
+      saveHistory("Derangements", `n=${n}`, display, api.online);
       showPlot("derange-res", "derangements", { n: n }, `Visual explanation for D(${n})`);
     }
 
@@ -2077,7 +2079,7 @@
         <b>Result:</b> ${display} distinct arrangements.
       `;
       document.getElementById("circ-res").style.display = "block";
-      saveHistory("Circular Permutations", `n=${n}, r=${r}, refl=${refl ? "yes" : "no"}`, display);
+      saveHistory("Circular Permutations", `n=${n}, r=${r}, refl=${refl ? "yes" : "no"}`, display, api.online);
       showPlot("circ-res", "circular", { n: n, r: r, allow_reflections: refl ? "1" : "0" }, `Visual explanation for circular permutations`);
     }
 
