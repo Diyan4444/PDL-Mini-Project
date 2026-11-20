@@ -54,21 +54,16 @@ def verify_expansion(n, a, b, my_terms):
     return False, str(expected), "Expansion difference is not 0."
 
 
-def closed_form_recurrence(coefficients, initial_values, my_terms):
-    # Asks SymPy's rsolve for a direct formula for a(n) (for Fibonacci this is Binet's
-    # formula), then substitutes n = 0..9 and compares with the terms we generated.
+def fibonacci_closed_form(my_terms):
+    # Asks SymPy's rsolve for a direct formula for F(n) (Binet's formula), then
+    # substitutes n = 0..9 and compares with the terms we generated with a loop.
     if not SYMPY_AVAILABLE:
         return False, "", [], INSTALL_MESSAGE
-    if len(coefficients) > 2:
-        return False, "", [], "SymPy rsolve verification is limited to recurrences of order <= 2."
     n = sympy.symbols("n", integer=True)
     f = sympy.Function("f")
-    # rsolve expects the recurrence as an expression equal to zero:
-    # f(n) - c1*f(n-1) - c2*f(n-2), with initial values {f(0): a0, f(1): a1}.
-    relation = f(n) - sum(c * f(n - i - 1) for i, c in enumerate(coefficients))
-    solution = sympy.rsolve(relation, f(n), {f(i): v for i, v in enumerate(initial_values)})
-    if solution is None:
-        return False, "", [], "SymPy rsolve could not find a closed-form solution."
+    # rsolve expects the recurrence as an expression equal to zero: f(n) - f(n-1) - f(n-2) = 0,
+    # with the starting values F(0) = 0 and F(1) = 1.
+    solution = sympy.rsolve(f(n) - f(n - 1) - f(n - 2), f(n), {f(0): 0, f(1): 1})
     checks = []
     for i, term in enumerate(my_terms[:10]):
         # simplify turns expressions with sqrt(5) back into an exact integer before comparing.
@@ -88,7 +83,7 @@ def run_all_symbolic_checks():
     ok_f, _, note_f = verify_factorial(10, combinatorics.factorial(10))
     ok_c, _, note_c = verify_combination(10, 4, combinatorics.combinations(10, 4))
     ok_e, expanded, note_e = verify_expansion(3, 2, -3, combinatorics.binomial_expansion_terms(3, 2, -3))
-    ok_r, closed, checks, note_r = closed_form_recurrence([1, 1], (0, 1), recurrence.fibonacci_sequence(10))
+    ok_r, closed, checks, note_r = fibonacci_closed_form(recurrence.fibonacci_sequence(10))
     results = [
         ("Factorial (10!)", ok_f, note_f, "10! = 3,628,800"),
         ("Binomial Coefficient C(10, 4)", ok_c, note_c, "C(10, 4) = 210"),

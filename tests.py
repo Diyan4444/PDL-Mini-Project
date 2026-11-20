@@ -5,7 +5,7 @@
 #   Aryan Adivarekar  - 251080008
 #   Advait Deodhar    - 251080018
 #
-# Automated tests. Run with: python tests.py (also menu option 17 in main.py).
+# Automated tests. Run with: python tests.py (also menu option 16 in main.py).
 # Plain functions, no test framework: each test_* returns a description when it passes
 # and raises (usually AssertionError) when it fails. To add a test, write a function
 # and add it to the TESTS list at the bottom.
@@ -23,13 +23,9 @@ from http.server import ThreadingHTTPServer
 import combinatorics as cb
 import recurrence
 import sympy_tools
-import history_manager
 import visualizer
 import web_viewer
 
-# run_all_tests() sends every history write here (and deletes it afterwards),
-# so the real history.txt is never changed by the tests.
-TEST_HISTORY_FILE = "test_run_temp_history.txt"
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
 
@@ -135,13 +131,12 @@ def test_recurrences():
     assert fib == [0, 1, 1, 2, 3, 5, 8, 13, 21, 34]
     assert recurrence.fibonacci_sequence(1) == [0]
     assert recurrence.factorial_recurrence(6) == [1, 1, 2, 6, 24, 120]
-    assert recurrence.custom_linear_recurrence(1, [3], (2,), 4) == [2, 6, 18, 54]
-    assert recurrence.custom_linear_recurrence(3, [1, 1, 1], (0, 0, 1), 2) == [0, 0]
-    assert recurrence.custom_linear_recurrence(3, [1, 1, 1], (0, 0, 1), 7) == [0, 0, 1, 1, 2, 4, 7]
-    assert raises(ValueError, recurrence.custom_linear_recurrence, 2, [1, 0], (1, 1), 5)
-    assert raises(ValueError, recurrence.custom_linear_recurrence, 2, [1, 1, 1], (1, 1), 5)
+    assert recurrence.fibonacci_sequence(2) == [0, 1]
+    assert recurrence.factorial_recurrence(1) == [1]
+    assert raises(ValueError, recurrence.fibonacci_sequence, 0)
     assert raises(ValueError, recurrence.fibonacci_sequence, 51)
-    return "Recurrences (Fibonacci, factorial, custom orders 1 and 3, invalid input)"
+    assert raises(ValueError, recurrence.factorial_recurrence, 51)
+    return "Recurrences (Fibonacci, factorial recurrence, 1 and 2 terms, invalid input)"
 
 
 def test_derangements():
@@ -180,25 +175,6 @@ def test_invalid_input_rejection():
     return "Invalid input rejection (negatives, r > n, booleans, floats, strings)"
 
 
-def test_history():
-    path = history_manager.get_history_file_path()
-    assert os.path.basename(path) == TEST_HISTORY_FILE
-    history_manager.clear_history()
-    assert history_manager.save_history_record("TEST|PERM", "n=5,\nr=3", "60")
-    assert history_manager.save_history_record("TEST_COMB", "n=5, r=2", "10")
-    # A line without 4 fields must be skipped, not crash the reader.
-    with open(path, "a", encoding="utf-8") as f:
-        f.write("broken line\n")
-    records, skipped = history_manager.read_history_records()
-    assert len(records) == 2 and skipped == 1
-    assert records[0]["operation"] == "TEST PERM" and records[0]["inputs"] == "n=5, r=3"
-    matches, total, _ = history_manager.search_history_records("comb")
-    assert len(matches) == 1 and total == 2
-    history_manager.clear_history()
-    assert history_manager.read_history_records() == ([], 0)
-    return "History save / read / search / clear (in a temporary file)"
-
-
 def test_sympy():
     if not sympy_tools.SYMPY_AVAILABLE:
         assert sympy_tools.run_all_symbolic_checks()["available"] is False
@@ -207,10 +183,10 @@ def test_sympy():
     assert sympy_tools.verify_combination(6, 2, 15)[0]
     assert not sympy_tools.verify_combination(6, 2, 16)[0]
     assert sympy_tools.verify_expansion(3, 2, -3, cb.binomial_expansion_terms(3, 2, -3))[0]
-    ok, _, checks, _ = sympy_tools.closed_form_recurrence([1, 1], (0, 1), recurrence.fibonacci_sequence(10))
+    ok, _, checks, _ = sympy_tools.fibonacci_closed_form(recurrence.fibonacci_sequence(10))
     assert ok and len(checks) == 10 and all(c["matched"] for c in checks)
-    ok, _, checks, _ = sympy_tools.closed_form_recurrence([3], (2,), [2, 6, 18, 54])
-    assert ok and all(c["matched"] for c in checks)
+    ok, _, checks, _ = sympy_tools.fibonacci_closed_form([0, 1, 1, 2, 4])
+    assert not checks[-1]["matched"]
     assert all(r["verified"] for r in sympy_tools.run_all_symbolic_checks()["results"])
     return "SymPy verification (factorial, binomial, expansion, rsolve)"
 
@@ -232,7 +208,7 @@ def test_visualizer():
         (visualizer.plot_comb_with_repetition, (0, 3)), (visualizer.plot_comb_with_repetition, (1000, 1000)),
         (visualizer.plot_listing, ("comb", 1, 1)), (visualizer.plot_listing, ("multiset", 0, 0, "AAB")),
         (visualizer.plot_binomial_identities, (0, 0)), (visualizer.plot_binomial_identities, (1000, 3)),
-        (visualizer.plot_pascal_triangle, (1,)), (visualizer.plot_recurrence, ("custom", [5], "one term")),
+        (visualizer.plot_pascal_triangle, (1,)), (visualizer.plot_recurrence, ("factorial", [1], "one term")),
         (visualizer.plot_binomial_expansion, (20, 10, -10)), (visualizer.plot_binomial_expansion, (0, 0, 0)),
         (visualizer.plot_derangements, (0,)), (visualizer.plot_derangements, (1000,)),
         (visualizer.plot_circular_permutations, (0,)), (visualizer.plot_circular_permutations, (12, 10, True)),
@@ -260,34 +236,37 @@ def test_server_routes():
     with test_server() as base:
         status, ctype, body = request(base + "/")
         assert status == 200 and "text/html" in ctype and b"<html" in body.lower()
-        for path in ("/main.py", "/history.txt", "/favicon.ico", "/../main.py", "/api/unknown"):
+        for path in ("/main.py", "/README.md", "/favicon.ico", "/../main.py", "/api/unknown", "/api/history"):
             assert request(base + path)[0] == 404, path
     return "Server serves index.html only and returns 404 for everything else"
 
 
 def test_api_calc():
     with test_server() as base:
-        expected = {
-            "op=factorial&n=5": "120",
-            "op=permutations&n=5&r=3": "60",
-            "op=combinations&n=5&r=3": "10",
-            "op=comparison&n=5&r=3": "P=60, C=10",
-            "op=permrep&n=5&r=3": "125",
-            "op=combrep&n=5&r=3": "35",
-            "op=multiset&word=MISSISSIPPI": "34650",
-            "op=listing&mode=perm&n=4&r=2": "MATCH",
-            "op=listing&mode=multi&word=AAB": "MATCH",
-            "op=identities&n=6&r=3": "All verified",
-            "op=pascal&rows=5": "Generated 5 rows",
-            "op=recurrence&type=custom&terms=5&order=2&coeffs=1,1&inits=0,1": "5 terms",
-            "op=expansion&n=2&a=2&b=-3": "4*x^2 - 12*x*y + 9*y^2",
-            "op=derangements&n=500": str(cb.derangements(500)),
-            "op=circular&n=5&r=3&reflections=1": "10",
-            "op=circular&n=5": "24",
-        }
-        for query, result in expected.items():
+        # (query, field in the JSON reply, expected value)
+        expected = [
+            ("op=factorial&n=5", "result", "120"),
+            ("op=permutations&n=5&r=3", "result", "60"),
+            ("op=combinations&n=5&r=3", "result", "10"),
+            ("op=comparison&n=5&r=3", "is_verified", True),
+            ("op=permrep&n=5&r=3", "result", "125"),
+            ("op=combrep&n=5&r=3", "result", "35"),
+            ("op=multiset&word=MISSISSIPPI", "result", "34650"),
+            ("op=listing&mode=perm&n=4&r=2", "count", 12),
+            ("op=listing&mode=multi&word=AAB", "items", ["AAB", "ABA", "BAA"]),
+            ("op=pascal&rows=5", "triangle", [[1], [1, 1], [1, 2, 1], [1, 3, 3, 1], [1, 4, 6, 4, 1]]),
+            ("op=recurrence&type=fib&terms=5", "sequence", ["0", "1", "1", "2", "3"]),
+            ("op=recurrence&type=fact&terms=6", "sequence", ["1", "1", "2", "6", "24", "120"]),
+            ("op=expansion&n=2&a=2&b=-3", "formatted", "4*x^2 - 12*x*y + 9*y^2"),
+            ("op=derangements&n=500", "result", str(cb.derangements(500))),
+            ("op=circular&n=5&r=3&reflections=1", "result", "10"),
+            ("op=circular&n=5", "result", "24"),
+        ]
+        for query, field, value in expected:
             status, data = get_json(f"{base}/api/calc?{query}")
-            assert status == 200 and data["success"] and data["result"] == result, query
+            assert status == 200 and data["success"] and data[field] == value, query
+        status, data = get_json(f"{base}/api/calc?op=identities&n=6&r=3")
+        assert data["report"]["c_nr"] == "20" and data["report"]["row_sum_verified"] is True
         status, data = get_json(f"{base}/api/calc?op=derangements&n=5")
         assert abs(data["ratio"] - 44 / 120) < 1e-12 and data["ratio_approx_1_over_e"] == 1 / math.e
 
@@ -295,9 +274,7 @@ def test_api_calc():
             ("op=factorial&n=-5", 400), ("op=factorial", 400), ("op=factorial&n=abc", 400), ("", 400),
             ("op=nope&n=1", 404), ("op=combinations&n=3&r=5", 400), ("op=multiset&word=" + "A" * 51, 400),
             ("op=multiset&word=a%20b", 400), ("op=listing&mode=x", 400), ("op=recurrence&type=x&terms=5", 400),
-            ("op=recurrence&type=custom&terms=5&order=1&coeffs=a&inits=1", 400),
-            ("op=recurrence&type=custom&terms=5&order=1&coeffs=5000&inits=1", 400),
-            ("op=recurrence&type=custom&terms=5&order=2&coeffs=1,0&inits=1,1", 400),
+            ("op=recurrence&type=custom&terms=5", 400), ("op=recurrence&type=fib&terms=51", 400),
         ]
         for query, code in bad:
             status, data = get_json(f"{base}/api/calc?{query}")
@@ -305,37 +282,11 @@ def test_api_calc():
     return "/api/calc returns correct results for all 14 operations and 400/404 for bad input"
 
 
-def test_api_history_and_sympy():
+def test_api_sympy():
     with test_server() as base:
-        # Expect exactly two records: one saved by /api/calc and one by the POST.
-        history_manager.clear_history()
-        get_json(f"{base}/api/calc?op=factorial&n=4")
-        body = json.dumps({"operation": "TestOp", "parameters": "k=1", "result": "99"}).encode()
-        assert request(f"{base}/api/history", "POST", {"Content-Type": "application/json"}, body)[0] == 200
-        assert request(f"{base}/api/history", "POST", data=b"not json")[0] == 400
-        status, data = get_json(f"{base}/api/history")
-        assert [r["operation"] for r in data["records"]] == ["Factorial", "TestOp"]
-        status, data = get_json(f"{base}/api/history?q=testop")
-        assert len(data["records"]) == 1 and data["total"] == 2
-        assert request(f"{base}/api/history", "DELETE")[0] == 200
-        assert get_json(f"{base}/api/history")[1]["records"] == []
         status, data = get_json(f"{base}/api/sympy")
         assert status == 200 and data["sympy"]["available"] == sympy_tools.SYMPY_AVAILABLE
-    return "/api/history (GET, POST, DELETE, search) and /api/sympy"
-
-
-def test_api_blocks_cross_site():
-    with test_server() as base:
-        port = base.rsplit(":", 1)[1]
-        evil = {"Origin": "http://evil.example", "Sec-Fetch-Site": "cross-site"}
-        assert request(f"{base}/api/history", "DELETE", evil)[0] == 403
-        assert request(f"{base}/api/history", "POST", evil, b"{}")[0] == 403
-        assert request(f"{base}/api/calc?op=factorial&n=5", headers=evil)[0] == 403
-        # DNS rebinding: a foreign domain pointed at 127.0.0.1 still sends its own Host header.
-        assert request(f"{base}/api/calc?op=factorial&n=5", headers={"Host": f"evil.example:{port}"})[0] == 403
-        same = {"Origin": base, "Sec-Fetch-Site": "same-origin"}
-        assert request(f"{base}/api/calc?op=factorial&n=5", headers=same)[0] == 200
-    return "API rejects cross-site and DNS-rebinding requests with 403"
+    return "/api/sympy reports the SymPy checks"
 
 
 def test_plot_endpoint():
@@ -371,41 +322,30 @@ TESTS = [
     test_derangements,
     test_circular_permutations,
     test_invalid_input_rejection,
-    test_history,
     test_sympy,
     test_visualizer,
     test_visualizer_without_matplotlib,
     test_server_routes,
     test_api_calc,
-    test_api_history_and_sympy,
-    test_api_blocks_cross_site,
+    test_api_sympy,
     test_plot_endpoint,
 ]
 
 
 def run_all_tests():
-    original_history = history_manager.DEFAULT_HISTORY_FILENAME
-    history_manager.DEFAULT_HISTORY_FILENAME = TEST_HISTORY_FILE
     passed = 0
     print("=" * 70)
     print("COMBINATORIAL COUNTING ANALYZER - AUTOMATED TEST SUITE")
     print("=" * 70)
-    try:
-        for test in TESTS:
-            try:
-                print("[PASS] " + test())
-                passed += 1
-            except Exception as e:
-                print(f"[FAIL] {test.__name__}: {type(e).__name__} {e}")
-    finally:
-        history_manager.DEFAULT_HISTORY_FILENAME = original_history
-        temp = history_manager.get_history_file_path(TEST_HISTORY_FILE)
-        if os.path.exists(temp):
-            os.remove(temp)
+    for test in TESTS:
+        try:
+            print("[PASS] " + test())
+            passed += 1
+        except Exception as e:
+            print(f"[FAIL] {test.__name__}: {type(e).__name__} {e}")
     print("=" * 70)
     print(f"TEST SUMMARY: {passed}/{len(TESTS)} tests passed. ({len(TESTS) - passed} failed)")
     print("=" * 70)
-    return {"passed": passed, "failed": len(TESTS) - passed, "total": len(TESTS)}
 
 
 if __name__ == "__main__":

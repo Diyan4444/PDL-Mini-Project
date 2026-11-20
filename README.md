@@ -7,7 +7,7 @@ A comprehensive, mathematically rigorous, and visual discrete mathematics explor
 ## ⚡ Three Ways to Use It
 
 - **Web App with Live Engine & Charts (Recommended):** Run `python web_viewer.py` → open http://127.0.0.1:8000
-- **Interactive Terminal CLI:** Run `python main.py` (menu options 0 to 18)
+- **Interactive Terminal CLI:** Run `python main.py` (menu options 0 to 17)
 - **Direct Browser File:** Double-click `index.html` (runs full calculations offline via client-side BigInt engine; charts gracefully instruct to start the Python server)
 
 ---
@@ -61,7 +61,7 @@ pip install -r requirements.txt
 ```
 - `matplotlib`: Generates all 14 dynamic visual explanation charts.
 - `sympy`: Optional dependency for formal symbolic verification and recurrence closed-form solvers (`rsolve`).
-- *Core mathematical engines, HTTP server, and history management use only the Python standard library.*
+- *Core mathematical engines and the HTTP server use only the Python standard library.*
 
 ---
 
@@ -83,7 +83,7 @@ Open http://127.0.0.1:8000 in your browser. Press Ctrl+C to stop.
 3. Try entering `5` in **Derangements** — you get exact `D(5) = 44`, ratio `44/120 = 0.3667`, comparison to limit `1/e ≈ 0.3679`, and an inclusion-exclusion partition chart!
 4. **Port in use:** Run `python web_viewer.py 8001` and navigate to http://127.0.0.1:8001.
 
-> **Security Note:** The server binds strictly to `127.0.0.1` (localhost only) and serves only `index.html`, the `/plot/` charts and the `/api/` routes. API requests coming from other websites are rejected with 403.
+> **Security Note:** The server binds strictly to `127.0.0.1` (localhost only) and serves only `index.html`, the `/plot/` charts and the `/api/` routes. The API only calculates and never changes any data.
 
 ---
 
@@ -93,10 +93,10 @@ Run the interactive terminal interface:
 ```bash
 python main.py
 ```
-- Clean numeric menu with options 1 to 18 (`0` to exit).
+- Clean numeric menu with options 1 to 17 (`0` to exit).
 - Prompts after each calculation to generate and view visual explanation charts.
-- **Option 18 (Visual Gallery):** Batch-generates all 14 demonstration charts into the `plots/` folder.
-- Non-visual tools (SymPy verification, history search/clear, automated self-tests) run in clean text mode.
+- **Option 17 (Visual Gallery):** Batch-generates all 14 demonstration charts into the `plots/` folder.
+- Non-visual tools (SymPy verification, automated self-tests) run in clean text mode.
 
 ---
 
@@ -106,8 +106,8 @@ Execute the comprehensive automated test suite:
 ```bash
 python tests.py
 ```
-**Test Result:** All **18/18 tests passed** (0 failed).  
-The suite checks known answers and edge cases (n = 0, n = 1000), brute-force derangement counts, invalid-input rejection, recurrences, history (in a temporary file, so your real `history.txt` is never touched), SymPy checks, every chart, all `/api/calc` and `/plot` operations, and the cross-site request protection.
+**Test Result:** All **16/16 tests passed** (0 failed).  
+The suite checks known answers and edge cases (n = 0, n = 1000), brute-force derangement counts, invalid-input rejection, recurrences, SymPy checks, every chart, and all `/api/calc` and `/plot` operations.
 
 ---
 
@@ -125,14 +125,13 @@ The suite checks known answers and edge cases (n = 0, n = 1000), brute-force der
 | **8** | Listing & Uniqueness | Exhaustive tuple enumeration | Arrangement badge grid with uniqueness verification |
 | **9** | Binomial Identities | Symmetry, Pascal rule, Sum = 2^n | Three panels: symmetry, Pascal addition, and row sums |
 | **10** | Pascal's Triangle | C(n, k) = C(n-1, k-1) + C(n-1, k) | Centered number pyramid with odd/even parity colouring |
-| **11** | Recurrence Analyzer | a(n) = c1*a(n-1) + ... + ck*a(n-k) | Step progression and Golden Ratio (phi ≈ 1.618) convergence |
+| **11** | Recurrence Analyzer | F(n) = F(n-1) + F(n-2); a(n) = n * a(n-1) | Step progression and Golden Ratio (phi ≈ 1.618) convergence |
 | **12** | Binomial Expansion | (a*x + b*y)^n via Sum C(n, k) | Signed polynomial coefficients and Pascal row mapping |
 | **13** | Derangements D(n) | D(n) = (n - 1) * [D(n-1) + D(n-2)] | Recurrence step bars, ratio D(n)/n!, and 1/e asymptote line |
 | **14** | Circular Permutations | P(n, r) / r (Necklaces: ÷ 2) | Rotational circle perimeter layout and symmetry orbits |
 | **15** | SymPy Verification | Formal algebraic cross-check & rsolve | Interactive verification cards with live symbolics |
-| **16** | Calculation History | Persistent log in history.txt | Audit table with keyword search and clear options |
-| **17** | Automated Self-Test | Regression suite covering all modules | Live browser runner with pass/fail badges |
-| **18** | Visual Gallery | Batch chart generation (14 plots) | Generates all 14 explanation charts into plots/ |
+| **16** | Automated Self-Test | Regression suite covering all modules | Live browser runner with pass/fail badges |
+| **17** | Visual Gallery | Batch chart generation (14 plots) | Generates all 14 explanation charts into plots/ |
 
 ---
 
@@ -145,17 +144,12 @@ Web Browser (index.html)
    │                                                                      │ (Exact Arbitrary BigInt)
    ├── [Visual Explanations] ──> GET /plot/<op>?... ─> visualizer.py ───> matplotlib (PNG Bytes)
    │
-   ├── [Formal Proofs] ───> GET /api/sympy ────────> sympy_tools.py ───> SymPy rsolve & expand
-   │
-   └── [Unified Audit] ───> GET/POST/DELETE /api/history ──> history_manager.py ──> history.txt
+   └── [Formal Proofs] ───> GET /api/sympy ────────> sympy_tools.py ───> SymPy rsolve & expand
 ```
 
 ### Key API Endpoints
 - `GET /api/calc?op=<operation>&<params>`: Evaluates operations via Python backend (all 14 operations) and returns JSON with the exact result.
 - `GET /plot/<operation>?<params>`: Generates and streams PNG image bytes for visual explanations.
-- `GET /api/history`: Retrieves history records from `history.txt`.
-- `POST /api/history`: Appends calculation records to `history.txt`.
-- `DELETE /api/history`: Clears `history.txt`.
 - `GET /api/sympy`: Runs formal symbolic checks (rsolve, expansions, limits).
 
 ---
@@ -165,15 +159,13 @@ Web Browser (index.html)
 ```
 PDL-Mini-Project/
 ├── combinatorics.py     # Pure math: n!, P, C, derangements, circular perms, multinomials, Pascal
-├── recurrence.py        # Sequence generators: Fibonacci, factorial rec, derangements, custom orders
+├── recurrence.py        # Sequence generators: Fibonacci and the factorial recurrence
 ├── visualizer.py        # Matplotlib visual explanations (14 high-resolution chart generators)
 ├── web_viewer.py        # Local Python HTTP server (serves index.html, /api/calc, /plot/ routes)
-├── main.py              # Interactive terminal CLI menu (options 0 to 18)
-├── tests.py             # 18 automated tests (maths, history, charts, HTTP API)
-├── sympy_tools.py       # Symbolic verification and closed-form recurrence solver
-├── history_manager.py   # Persistent calculation audit log and search engine (history.txt)
+├── main.py              # Interactive terminal CLI menu (options 0 to 17)
+├── tests.py             # 16 automated tests (maths, charts, HTTP API)
+├── sympy_tools.py       # Symbolic verification and Fibonacci closed-form solver
 ├── index.html           # Single-page web app (Dual-engine: Python backend + Offline JS fallback)
-├── history.txt          # Saved calculation history records
 ├── requirements.txt     # Optional libraries (matplotlib, sympy)
 ├── .gitignore           # Git ignore rules (plots/, __pycache__/)
 └── plots/               # Auto-generated demo charts (git-ignored)

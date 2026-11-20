@@ -9,10 +9,9 @@
 # Routes:
 #   /                 the page (index.html)
 #   /plot/<op>?...    PNG chart for one operation
-#   /api/calc?op=...  JSON result for one operation (also saved to history)
-#   /api/history      GET to list or search (?q=), POST to add, DELETE to clear
+#   /api/calc?op=...  JSON result for one operation
 #   /api/sympy        results of the SymPy checks
-# Anything else returns 404, so source files and history.txt are never served.
+# Anything else returns 404, so the source files are never served.
 
 import os
 import sys
@@ -23,7 +22,6 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 import combinatorics
 import recurrence
 import visualizer
-import history_manager
 import sympy_tools
 
 # Localhost only: the server cannot be reached from other machines on the network.
@@ -60,20 +58,6 @@ def get_int(params, key, low, high):
     if not low <= value <= high:
         raise BadRequest(f"{key} must satisfy {low} <= {key} <= {high}.")
     return value
-
-
-def get_int_list(params, key, count):
-    # Comma-separated integers, e.g. coeffs=1,1 for a custom recurrence.
-    parts = [p.strip() for p in get_text(params, key).split(",") if p.strip()]
-    if len(parts) != count:
-        raise BadRequest(f"Expected {count} comma-separated values for '{key}', got {len(parts)}.")
-    try:
-        values = [int(p) for p in parts]
-    except ValueError:
-        raise BadRequest(f"'{key}' must contain only integers.")
-    if any(abs(v) > 1000 for v in values):
-        raise BadRequest("Coefficients and initial values must have absolute value <= 1000.")
-    return values
 
 
 def get_word(params, max_len):
@@ -118,22 +102,13 @@ def parse_pascal(params):
 
 
 def parse_recurrence(params):
-    # The terms are generated here because the chart needs the sequence itself,
-    # not the recurrence settings.
+    # The terms are generated here because the chart needs the sequence itself.
     kind = get_text(params, "type")
     count = get_int(params, "terms", 1, recurrence.MAX_TERMS)
     if kind in ("fib", "fibonacci"):
         return {"rec_type": "fibonacci", "terms": recurrence.fibonacci_sequence(count), "label": "Fibonacci Sequence"}
     if kind in ("fact", "factorial"):
         return {"rec_type": "factorial", "terms": recurrence.factorial_recurrence(count), "label": "Factorial Recurrence"}
-    if kind == "custom":
-        order = get_int(params, "order", 1, 5)
-        coeffs = get_int_list(params, "coeffs", order)
-        inits = get_int_list(params, "inits", order)
-        if coeffs[-1] == 0:
-            raise BadRequest(f"Trailing coefficient c{order} cannot be 0.")
-        terms = recurrence.custom_linear_recurrence(order, coeffs, inits, count)
-        return {"rec_type": "custom", "terms": terms, "label": f"Custom Recurrence (Order {order})"}
     raise BadRequest(f"Unsupported recurrence type '{kind}'.")
 
 
@@ -151,92 +126,78 @@ def parse_circular(params):
 
 
 # ---------------------------------------------------------------------------
-# Calculations. Each calc_* returns (history operation name, history inputs, JSON payload).
-# payload["result"] is what gets saved to history. Big integers are sent as strings
-# because JavaScript numbers lose precision above 2^53.
+# Calculations. Each calc_* returns the JSON payload for /api/calc. Big integers are
+# sent as strings because JavaScript numbers lose precision above 2^53.
 # ---------------------------------------------------------------------------
 
 def calc_factorial(n):
     value = str(combinatorics.factorial(n))
-    return "Factorial", f"n={n}", {"result": value, "digit_count": len(value)}
+    return {"result": value, "digit_count": len(value)}
 
 
 def calc_permutations(n, r):
-    return "Permutations", f"n={n}, r={r}", {"result": str(combinatorics.permutations(n, r))}
+    return {"result": str(combinatorics.permutations(n, r))}
 
 
 def calc_combinations(n, r):
-    return "Combinations", f"n={n}, r={r}", {"result": str(combinatorics.combinations(n, r))}
+    return {"result": str(combinatorics.combinations(n, r))}
 
 
 def calc_comparison(n, r):
     p, c, rf = combinatorics.permutations(n, r), combinatorics.combinations(n, r), combinatorics.factorial(r)
-    payload = {"p": str(p), "c": str(c), "rfact": str(rf), "is_verified": p == c * rf, "result": f"P={p}, C={c}"}
-    return "Comparison", f"n={n}, r={r}", payload
+    return {"p": str(p), "c": str(c), "rfact": str(rf), "is_verified": p == c * rf}
 
 
 def calc_permrep(n, r):
-    return "Permutations with Repetition", f"n={n}, r={r}", {"result": str(combinatorics.permutations_with_repetition(n, r))}
+    return {"result": str(combinatorics.permutations_with_repetition(n, r))}
 
 
 def calc_combrep(n, r):
-    return "Combinations with Repetition", f"n={n}, r={r}", {"result": str(combinatorics.combinations_with_repetition(n, r))}
+    return {"result": str(combinatorics.combinations_with_repetition(n, r))}
 
 
 def calc_multiset(text):
     count, freq = combinatorics.multiset_arrangements_count(text)
-    return "Multiset Arrangements", f"word='{text}'", {"result": str(count), "frequencies": freq, "total_length": len(text)}
+    return {"result": str(count), "frequencies": freq, "total_length": len(text)}
 
 
 def calc_listing(mode, n, r, text):
     if mode == "multiset":
         items, expected, ok = combinatorics.list_multiset_permutations(text)
-        inputs = f"word='{text}'"
     else:
         lister = combinatorics.list_letter_permutations if mode == "perm" else combinatorics.list_letter_combinations
         items, expected, ok = lister(n, r)
-        inputs = f"n={n}, r={r}"
-    payload = {"items": ["".join(i) for i in items], "count": len(items), "theoretical": expected, "is_match": ok,
-               "result": "MATCH" if ok else "MISMATCH"}
-    return f"Listing ({mode})", inputs, payload
+    return {"items": ["".join(i) for i in items], "count": len(items), "theoretical": expected, "is_match": ok}
 
 
 def calc_identities(n, r):
     report = combinatorics.verify_binomial_identities(n, r)
     # Convert the big integers to strings but leave the True/False/None flags alone
     # (bool is a subclass of int, hence the extra check).
-    report = {k: str(v) if isinstance(v, int) and not isinstance(v, bool) else v for k, v in report.items()}
-    verified = report["symmetry_verified"] and report["row_sum_verified"] and report["pascal_verified"] is not False
-    return "Binomial Identities", f"n={n}, r={r}", {"report": report, "result": "All verified" if verified else "Failed"}
+    return {"report": {k: str(v) if isinstance(v, int) and not isinstance(v, bool) else v for k, v in report.items()}}
 
 
 def calc_pascal(num_rows):
-    triangle = combinatorics.generate_pascal_triangle(num_rows)
-    return "Pascal's Triangle", f"rows={num_rows}", {"triangle": triangle, "result": f"Generated {num_rows} rows"}
+    return {"triangle": combinatorics.generate_pascal_triangle(num_rows)}
 
 
 def calc_recurrence(rec_type, terms, label):
-    payload = {"type": rec_type, "label": label, "sequence": [str(t) for t in terms], "result": f"{len(terms)} terms"}
-    return "Recurrence Relations", f"{label}, terms={len(terms)}", payload
+    return {"type": rec_type, "label": label, "sequence": [str(t) for t in terms]}
 
 
 def calc_expansion(n, a, b):
     terms = combinatorics.binomial_expansion_terms(n, a, b)
-    formatted = combinatorics.format_binomial_expansion(terms)
-    payload = {"formatted": formatted, "terms": [(str(c), xp, yp) for c, xp, yp in terms], "result": formatted}
-    return "Binomial Expansion", combinatorics.binomial_label(n, a, b), payload
+    return {"formatted": combinatorics.format_binomial_expansion(terms), "terms": [(str(c), xp, yp) for c, xp, yp in terms]}
 
 
 def calc_derangements(n):
     report = combinatorics.derangements_report(n)
-    payload = {"result": str(report["derangements"]), "factorial": str(report["factorial"]),
-               "ratio": report["ratio"], "ratio_approx_1_over_e": report["limit"]}
-    return "Derangements", f"n={n}", payload
+    return {"result": str(report["derangements"]), "factorial": str(report["factorial"]),
+            "ratio": report["ratio"], "ratio_approx_1_over_e": report["limit"]}
 
 
 def calc_circular(n, r, allow_reflections):
-    count = combinatorics.circular_permutations(n, r, allow_reflections)
-    return "Circular Permutations", f"n={n}, r={r}, reflections={allow_reflections}", {"result": str(count)}
+    return {"result": str(combinatorics.circular_permutations(n, r, allow_reflections))}
 
 
 # Every operation the server supports: name -> (parser, calculator, chart function).
@@ -283,21 +244,6 @@ class WebViewerHandler(BaseHTTPRequestHandler):
     def send_json(self, code, data):
         self.send(code, json.dumps(data).encode("utf-8"), "application/json; charset=utf-8")
 
-    def is_cross_site(self):
-        # Stops other websites open in the same browser from using the API (for example
-        # to clear the history), and stops DNS-rebinding attacks:
-        #   - the Host header must be this server's own localhost address;
-        #   - browsers add Sec-Fetch-Site / Origin headers, which must say "same origin".
-        # Tools like curl and the tests send neither header, so they are allowed.
-        port = self.server.server_address[1]
-        hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
-        if self.headers.get("Host", "") not in hosts:
-            return True
-        if self.headers.get("Sec-Fetch-Site", "same-origin") not in ("same-origin", "none"):
-            return True
-        origin = self.headers.get("Origin")
-        return origin is not None and origin not in {"http://" + h for h in hosts}
-
     def do_GET(self):
         url = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(url.query)
@@ -305,52 +251,12 @@ class WebViewerHandler(BaseHTTPRequestHandler):
             self.serve_index()
         elif url.path.startswith("/plot/"):
             self.handle_plot(url.path[len("/plot/"):], params)
-        elif not url.path.startswith("/api/"):
-            self.send_text(404, "Not Found")
-        # Charts have no side effects, so only the /api/ routes need the cross-site check.
-        elif self.is_cross_site():
-            self.send_text(403, "Forbidden: cross-site API requests are not allowed.")
         elif url.path == "/api/calc":
             self.handle_calc(get_text(params, "op"), params)
-        elif url.path == "/api/history":
-            self.handle_history_get(get_text(params, "q"))
         elif url.path == "/api/sympy":
             self.send_json(200, {"success": True, "sympy": sympy_tools.run_all_symbolic_checks()})
         else:
             self.send_text(404, "Not Found")
-
-    def do_POST(self):
-        # Only history accepts POST: the page uses it to save calculations it did in
-        # JavaScript (the ones not sent through /api/calc, which saves its own).
-        if urllib.parse.urlparse(self.path).path != "/api/history":
-            self.send_text(404, "Not Found")
-            return
-        if self.is_cross_site():
-            self.send_text(403, "Forbidden: cross-site API requests are not allowed.")
-            return
-        try:
-            length = int(self.headers.get("Content-Length", 0))
-            # Reject oversized bodies; a history record is a few hundred bytes at most.
-            if not 0 <= length <= 100000:
-                raise ValueError
-            data = json.loads(self.rfile.read(length) or b"{}")
-            if not isinstance(data, dict):
-                raise ValueError
-        except ValueError:
-            self.send_json(400, {"success": False, "error": "Invalid request body."})
-            return
-        ok = history_manager.save_history_record(data.get("operation", "Custom Calculation"),
-                                                 data.get("inputs") or data.get("parameters", ""), data.get("result", ""))
-        self.send_json(200, {"success": ok})
-
-    def do_DELETE(self):
-        if urllib.parse.urlparse(self.path).path != "/api/history":
-            self.send_text(404, "Not Found")
-        elif self.is_cross_site():
-            self.send_text(403, "Forbidden: cross-site API requests are not allowed.")
-        else:
-            history_manager.clear_history()
-            self.send_json(200, {"success": True, "message": "History cleared successfully."})
 
     def serve_index(self):
         try:
@@ -389,7 +295,7 @@ class WebViewerHandler(BaseHTTPRequestHandler):
             return
         parse, calc, _ = OPERATIONS[op]
         try:
-            label, inputs, payload = calc(**parse(params))
+            payload = calc(**parse(params))
         except (BadRequest, ValueError, TypeError) as e:
             self.send_json(400, {"success": False, "engine": "python", "error": str(e)})
             return
@@ -397,16 +303,7 @@ class WebViewerHandler(BaseHTTPRequestHandler):
             sys.stderr.write(f"[Calc API Error] {op}: {e}\n")
             self.send_json(500, {"success": False, "engine": "python", "error": "Computation error."})
             return
-        history_manager.save_history_record(label, inputs, payload["result"])
         self.send_json(200, {"success": True, "engine": "python", "operation": op, **payload})
-
-    def handle_history_get(self, query):
-        if query:
-            records, total, skipped = history_manager.search_history_records(query)
-        else:
-            records, skipped = history_manager.read_history_records()
-            total = len(records)
-        self.send_json(200, {"success": True, "records": records, "total": total, "skipped": skipped})
 
 
 def run_server(port=DEFAULT_PORT):

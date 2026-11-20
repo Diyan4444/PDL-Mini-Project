@@ -377,25 +377,6 @@
       font-weight: 600;
     }
 
-    /* History table */
-    .history-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.88rem;
-      margin-top: 14px;
-    }
-    .history-table th, .history-table td {
-      border: 1px solid var(--border);
-      padding: 10px 14px;
-      text-align: left;
-    }
-    .history-table th {
-      background: #f1f5f9;
-      font-weight: 600;
-      color: #475569;
-    }
-    .history-table tr:hover { background: #f8fafc; }
-
     /* Test suite output */
     .test-card {
       display: flex;
@@ -482,16 +463,13 @@
       </li>
     </ul>
 
-    <div class="nav-group-title">Verification & Audit</div>
+    <div class="nav-group-title">Verification</div>
     <ul class="nav-list">
       <li class="nav-item" onclick="switchView('view-sympy')">
         <span class="nav-num">15</span> Symbolic Verification (SymPy)
       </li>
-      <li class="nav-item" onclick="switchView('view-history')">
-        <span class="nav-num">16</span> Calculation History
-      </li>
       <li class="nav-item" onclick="switchView('view-tests')">
-        <span class="nav-num">17</span> Automated Self-Test
+        <span class="nav-num">16</span> Automated Self-Test
       </li>
     </ul>
   </aside>
@@ -821,30 +799,19 @@
     <div id="view-recurrence" class="view-panel">
       <div class="card">
         <div class="card-title">Recurrence Relation Analyzer</div>
-        <div class="card-desc">Numerically generate sequential terms for Fibonacci, Factorial, or Custom linear recurrences of order k.</div>
+        <div class="card-desc">Numerically generate sequential terms for the Fibonacci or Factorial recurrence.</div>
         <div class="form-grid">
           <div class="form-group">
             <label>Sequence Type:</label>
-            <select id="rec-type" onchange="toggleRecInputs()">
+            <select id="rec-type">
               <option value="fib">Fibonacci: F(n) = F(n-1) + F(n-2), F(0)=0, F(1)=1</option>
               <option value="fact">Factorial Recurrence: a(n) = n * a(n-1), a(0)=1</option>
-              <option value="custom">Custom Order k Linear Recurrence (1 &le; k &le; 5)</option>
             </select>
           </div>
           <div class="form-group">
             <label>Number of terms to generate (1 to 50):</label>
             <input type="number" id="rec-terms" value="10" min="1" max="50">
           </div>
-        </div>
-
-        <div id="rec-custom-box" style="display:none; margin-bottom:18px; padding:16px; background:#f1f5f9; border-radius:6px;">
-          <div class="form-grid">
-            <div class="form-group">
-              <label>Order k (1 to 5):</label>
-              <input type="number" id="rec-order" value="2" min="1" max="5" onchange="renderCustomRecFields()">
-            </div>
-          </div>
-          <div id="rec-dynamic-fields"></div>
         </div>
 
         <button class="btn btn-primary" onclick="calcRecurrence()">Generate Terms</button>
@@ -990,42 +957,7 @@
       </div>
     </div>
 
-    <!-- 16. HISTORY -->
-    <div id="view-history" class="view-panel">
-      <div class="card">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-          <div>
-            <div class="card-title">Calculation History</div>
-            <div class="card-desc" style="margin-bottom:0;">Session and persistent audit log matching history.txt</div>
-          </div>
-          <div style="display:flex; gap:8px;">
-            <button class="btn btn-outline" onclick="clearHistory()">Clear History</button>
-          </div>
-        </div>
-
-        <div style="margin-bottom:14px;">
-          <input type="text" id="hist-search" placeholder="Search history by operation or parameter..." oninput="renderHistoryTable()" style="width:100%; padding:9px 12px; border:1px solid var(--border); border-radius:6px;">
-        </div>
-
-        <div style="overflow-x:auto;">
-          <table class="history-table">
-            <thead>
-              <tr>
-                <th style="width:170px;">Timestamp</th>
-                <th style="width:190px;">Operation</th>
-                <th style="width:200px;">Inputs</th>
-                <th>Result</th>
-              </tr>
-            </thead>
-            <tbody id="hist-tbody">
-              <tr><td colspan="4" style="text-align:center; color:var(--text-muted);">No calculations recorded yet.</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
-    <!-- 17. SELF TEST -->
+    <!-- 16. SELF TEST -->
     <div id="view-tests" class="view-panel">
       <div class="card">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
@@ -1106,92 +1038,6 @@
         return s.slice(0, 20) + "..." + s.slice(-10) + " (" + s.length + " digits)";
       }
       return s;
-    }
-
-    // =========================================================================
-    // HISTORY MANAGER (LOCAL STORAGE PERSISTENCE)
-    // =========================================================================
-    const HIST_KEY = "combinatorics_history_log";
-
-    // serverLogged: true when /api/calc already wrote this record to history.txt,
-    // so only the local browser copy is needed (avoids duplicate lines).
-    async function saveHistory(op, inputs, result, serverLogged = false) {
-      const now = new Date();
-      const ts = now.toISOString().slice(0, 19).replace("T", " ");
-      const rec = {
-        timestamp: ts,
-        operation: String(op).replace(/[|\n\r]/g, " "),
-        inputs: String(inputs).replace(/[|\n\r]/g, " "),
-        result: String(result).replace(/[|\n\r]/g, " ")
-      };
-      // 1. Local browser storage
-      try {
-        const existing = JSON.parse(localStorage.getItem(HIST_KEY) || "[]");
-        existing.unshift(rec);
-        if (existing.length > 200) existing.pop();
-        localStorage.setItem(HIST_KEY, JSON.stringify(existing));
-      } catch (e) {}
-
-      // 2. Python backend history.txt persistence
-      if (!serverLogged) try {
-        fetch("/api/history", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ operation: op, parameters: inputs, result: result })
-        }).catch(() => {});
-      } catch (e) {}
-
-      renderHistoryTable();
-    }
-
-    async function renderHistoryTable() {
-      const query = (document.getElementById("hist-search")?.value || "").toLowerCase().trim();
-      const tbody = document.getElementById("hist-tbody");
-      if (!tbody) return;
-
-      let records = [];
-      try {
-        const res = await fetch("/api/history" + (query ? "?q=" + encodeURIComponent(query) : ""));
-        if (res.ok) {
-          const data = await res.json();
-          if (data && data.success && Array.isArray(data.records)) {
-            records = data.records;
-          }
-        }
-      } catch (err) {}
-
-      if (records.length === 0) {
-        const local = JSON.parse(localStorage.getItem(HIST_KEY) || "[]");
-        records = local.filter(r => 
-          (r.operation || "").toLowerCase().includes(query) || (r.inputs || r.parameters || "").toLowerCase().includes(query)
-        );
-      }
-
-      if (records.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">No calculation records recorded yet.</td></tr>`;
-        return;
-      }
-
-      tbody.innerHTML = records.map(r => `
-        <tr>
-          <td style="font-family:var(--font-mono); font-size:0.8rem; color:var(--text-muted);">${r.timestamp || "-"}</td>
-          <td><b>${r.operation || "-"}</b></td>
-          <td style="font-family:var(--font-mono); font-size:0.82rem;">${r.inputs || r.parameters || "-"}</td>
-          <td style="font-family:var(--font-mono); font-weight:600; color:var(--primary); word-break:break-all;">${r.result || "-"}</td>
-        </tr>
-      `).join("");
-    }
-
-    async function clearHistory() {
-      if (confirm("Clear all calculation records from both server history.txt and local browser storage?")) {
-        try {
-          await fetch("/api/history", { method: "DELETE" });
-        } catch (e) {}
-        try {
-          localStorage.removeItem(HIST_KEY);
-        } catch (e) {}
-        renderHistoryTable();
-      }
     }
 
     // =========================================================================
@@ -1280,7 +1126,6 @@
       "view-derangements": ["Derangements D(n) (Subfactorial !n)", "Permutations with zero fixed points: D(n) = (n - 1) * [D(n-1) + D(n-2)]"],
       "view-circular": ["Circular Permutations", "Rotational equivalence around a circle: P(n, r) / r and necklaces &divide; 2"],
       "view-sympy": ["Symbolic Verification (SymPy Reference)", "Formal mathematical relationships verified symbolically in Python"],
-      "view-history": ["Calculation History Log", "Session audit log unified with history.txt"],
       "view-tests": ["Automated Self-Test Suite", "Live execution of the automated verification test suite"]
     };
 
@@ -1302,7 +1147,6 @@
         document.getElementById("current-title").innerText = viewMetadata[viewId][0];
         document.getElementById("current-desc").innerText = viewMetadata[viewId][1];
       }
-      if (viewId === "view-history") renderHistoryTable();
     }
 
     // =========================================================================
@@ -1503,7 +1347,6 @@
         <b>Zero factorial rule:</b> 0! = 1 by definition (representing 1 unique arrangement of the empty set).
       `;
       document.getElementById("fact-res").style.display = "block";
-      saveHistory("Factorial", `n=${n}`, display, api.online);
       showPlot("fact-res", "factorial", { n: n }, `Visual explanation for ${n}!`);
     }
 
@@ -1529,7 +1372,6 @@
         <b>Meaning:</b> There are ${display} distinct ways to arrange ${r} items from ${n} items where sequence order matters.
       `;
       document.getElementById("perm-res").style.display = "block";
-      saveHistory("Permutations", `n=${n}, r=${r}`, display, api.online);
       showPlot("perm-res", "permutations", { n: n, r: r }, `Visual explanation for P(${n}, ${r})`);
     }
 
@@ -1555,7 +1397,6 @@
         <b>Why we divide by r!:</b> For any group of ${r} items, there exist ${r}! internal orderings that all represent the identical subset.
       `;
       document.getElementById("comb-res").style.display = "block";
-      saveHistory("Combinations", `n=${n}, r=${r}`, display, api.online);
       showPlot("comb-res", "combinations", { n: n, r: r }, `Visual explanation for C(${n}, ${r})`);
     }
 
@@ -1600,7 +1441,6 @@
       }
 
       document.getElementById("comp-res").style.display = "block";
-      saveHistory("Comparison", `n=${n}, r=${r}`, `P=${formatLargeNum(p)}, C=${formatLargeNum(c)}`);
       showPlot("comp-res", "comparison", { n: n, r: r }, `Visual comparison for P(${n}, ${r}) vs C(${n}, ${r})`);
     }
 
@@ -1619,7 +1459,6 @@
         <b>Zero power rule:</b> 0^0 = 1 by convention (the single empty sequence).
       `;
       document.getElementById("prep-res").style.display = "block";
-      saveHistory("Perm w/ Rep", `n=${n}, r=${r}`, display);
       showPlot("prep-res", "permrep", { n: n, r: r }, `Visual explanation for ${n}^${r}`);
     }
 
@@ -1639,7 +1478,6 @@
         <b>Example:</b> Choosing 3 scoops from 5 ice-cream types = C(5 + 3 - 1, 3) = C(7, 3) = 35.
       `;
       document.getElementById("crep-res").style.display = "block";
-      saveHistory("Comb w/ Rep", `n=${n}, r=${r}`, display);
       showPlot("crep-res", "combrep", { n: n, r: r }, `Visual explanation for multichoose C(${n}+${r}-1, ${r})`);
     }
 
@@ -1661,7 +1499,6 @@
         <b>Canonical check:</b> 'MISSISSIPPI' has 11 letters (1 M, 4 I, 4 S, 2 P) = 11!/(1!4!4!2!) = 34,650.
       `;
       document.getElementById("multi-res").style.display = "block";
-      saveHistory("Multiset", `text='${text}'`, display);
       showPlot("multi-res", "multiset", { word: text }, `Visual explanation for multiset '${text}'`);
     }
 
@@ -1747,7 +1584,6 @@
       `).join("");
 
       document.getElementById("list-res").style.display = "block";
-      saveHistory("Listing (" + mode + ")", `count=${items.length}`, match ? "MATCH" : "MISMATCH");
       if (mode === "multi") {
         const wordVal = document.getElementById("list-word").value.trim();
         showPlot("list-res", "listing", { mode: "multi", word: wordVal }, `Visual listing for multiset '${wordVal}'`);
@@ -1803,7 +1639,6 @@
       `;
 
       document.getElementById("id-res").style.display = "block";
-      saveHistory("Identities", `n=${n}, r=${r}`, "All verified");
       showPlot("id-res", "identities", { n: n, r: r }, `Visual explanation for binomial identities n=${n}, r=${r}`);
     }
 
@@ -1839,38 +1674,7 @@
       }).join("");
 
       document.getElementById("pascal-res").style.display = "block";
-      saveHistory("Pascal Triangle", `rows=${rows}`, `Rendered ${rows} rows`);
       showPlot("pascal-res", "pascal", { rows: rows }, `Visual explanation for Pascal's triangle with ${rows} rows`);
-    }
-
-    function toggleRecInputs() {
-      const type = document.getElementById("rec-type").value;
-      document.getElementById("rec-custom-box").style.display = (type === "custom") ? "block" : "none";
-      if (type === "custom") renderCustomRecFields();
-    }
-
-    function renderCustomRecFields() {
-      const k = parseStrictInt(document.getElementById("rec-order").value) || 2;
-      let html = `<div style="display:grid; grid-template-columns: repeat(${k}, 1fr); gap:10px; margin-bottom:12px;">`;
-      for (let i = 1; i <= k; i++) {
-        html += `
-          <div class="form-group">
-            <label>c${i} ${i === k ? '(non-zero)' : ''}:</label>
-            <input type="number" id="rec-c-${i}" value="1">
-          </div>
-        `;
-      }
-      html += `</div><div style="display:grid; grid-template-columns: repeat(${k}, 1fr); gap:10px;">`;
-      for (let i = 0; i < k; i++) {
-        html += `
-          <div class="form-group">
-            <label>Initial a(${i}):</label>
-            <input type="number" id="rec-a-${i}" value="${i}">
-          </div>
-        `;
-      }
-      html += `</div>`;
-      document.getElementById("rec-dynamic-fields").innerHTML = html;
     }
 
     function calcRecurrence() {
@@ -1882,9 +1686,6 @@
 
       let seq = [];
       let title = "";
-      let customK = 2;
-      let customCoeffs = [];
-      let customInits = [];
 
       if (type === "fib") {
         title = "Fibonacci Sequence: F(n) = F(n-1) + F(n-2)";
@@ -1893,39 +1694,11 @@
           seq.push(seq[seq.length - 1] + seq[seq.length - 2]);
         }
         seq = seq.slice(0, terms);
-      } else if (type === "fact") {
+      } else {
         title = "Factorial Recurrence: a(n) = n * a(n-1)";
         seq = [1n];
         for (let n = 1; n < terms; n++) {
           seq.push(BigInt(n) * seq[n - 1]);
-        }
-      } else {
-        const k = parseStrictInt(document.getElementById("rec-order").value);
-        customK = k;
-        const coeffs = [];
-        const inits = [];
-        for (let i = 1; i <= k; i++) {
-          const c = parseStrictInt(document.getElementById(`rec-c-${i}`).value);
-          if (isNaN(c)) { alert(`Invalid coefficient c${i}`); return; }
-          if (i === k && c === 0) { alert(`Trailing coefficient c${k} cannot be 0!`); return; }
-          coeffs.push(BigInt(c));
-        }
-        for (let i = 0; i < k; i++) {
-          const a = parseStrictInt(document.getElementById(`rec-a-${i}`).value);
-          if (isNaN(a)) { alert(`Invalid initial value a(${i})`); return; }
-          inits.push(BigInt(a));
-        }
-        customCoeffs = coeffs;
-        customInits = inits;
-
-        title = `Custom Linear Recurrence (Order ${k})`;
-        seq = inits.slice(0, terms);
-        for (let n = k; n < terms; n++) {
-          let nextVal = 0n;
-          for (let i = 0; i < k; i++) {
-            nextVal += coeffs[i] * seq[n - 1 - i];
-          }
-          seq.push(nextVal);
         }
       }
 
@@ -1937,16 +1710,11 @@
       `).join("");
 
       document.getElementById("rec-res").style.display = "block";
-      saveHistory(title, `terms=${terms}`, `Generated ${seq.length} terms`);
 
       if (type === "fib") {
         showPlot("rec-res", "recurrence", { type: "fib", terms: terms }, "Visual explanation for Fibonacci sequence");
-      } else if (type === "fact") {
-        showPlot("rec-res", "recurrence", { type: "fact", terms: terms }, "Visual explanation for factorial recurrence");
       } else {
-        const coeffsStr = customCoeffs.map(c => c.toString()).join(",");
-        const initsStr = customInits.map(a => a.toString()).join(",");
-        showPlot("rec-res", "recurrence", { type: "custom", order: customK, coeffs: coeffsStr, inits: initsStr, terms: terms }, `Visual explanation for custom recurrence order ${customK}`);
+        showPlot("rec-res", "recurrence", { type: "fact", terms: terms }, "Visual explanation for factorial recurrence");
       }
     }
 
@@ -1995,7 +1763,6 @@
         Exact algebraic expansion for ${inputExpr}.
       `;
       document.getElementById("exp-res").style.display = "block";
-      saveHistory("Expansion", inputExpr, expansionStr);
       showPlot("exp-res", "expansion", { n: n, a: a, b: b }, `Visual explanation for expansion of ${inputExpr}`);
     }
 
@@ -2042,7 +1809,6 @@
         ${ratioText}
       `;
       document.getElementById("derange-res").style.display = "block";
-      saveHistory("Derangements", `n=${n}`, display, api.online);
       showPlot("derange-res", "derangements", { n: n }, `Visual explanation for D(${n})`);
     }
 
@@ -2080,7 +1846,6 @@
         <b>Result:</b> ${display} distinct arrangements.
       `;
       document.getElementById("circ-res").style.display = "block";
-      saveHistory("Circular Permutations", `n=${n}, r=${r}, refl=${refl ? "yes" : "no"}`, display, api.online);
       showPlot("circ-res", "circular", { n: n, r: r, allow_reflections: refl ? "1" : "0" }, `Visual explanation for circular permutations`);
     }
 
@@ -2156,11 +1921,6 @@
           try { combinations(3, 5); return false; } catch (e) { /* expected */ }
           return true;
         }],
-        ["History persistence and round-trip verification", () => {
-          saveHistory("TEST_SUITE_CHECK", "n=99", "99");
-          const records = JSON.parse(localStorage.getItem(HIST_KEY) || "[]");
-          return records.length > 0 && records[0].operation === "TEST_SUITE_CHECK";
-        }],
         ["Exact arbitrary integer arithmetic integrity (no float rounding)", () => {
           const bigFact = factorial(30);
           const bigPerm = permutations(30, 15);
@@ -2208,14 +1968,8 @@
           ${passed} / ${testCases.length} Tests Passed (0 Failed)
         </span>
       `;
-      saveHistory("Self-Test", `Total=${testCases.length}`, `Passed=${passed}/${testCases.length}`);
     }
 
-    // Initialize custom recurrence fields and history on load
-    window.addEventListener("DOMContentLoaded", () => {
-      renderCustomRecFields();
-      renderHistoryTable();
-    });
   </script>
 </body>
 </html>
