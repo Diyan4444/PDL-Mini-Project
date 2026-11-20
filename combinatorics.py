@@ -4,597 +4,248 @@
 #   Diyan Shah        - 251080020
 #   Aryan Adivarekar  - 251080008
 #   Advait Deodhar    - 251080018
-# Module: combinatorics.py - Core mathematical counting algorithms, identities, and listing
+#
+# Core counting functions used by the CLI, the web server and the charts.
+# Python integers have unlimited size, so every result here is exact (no rounding),
+# even for inputs like 1000! that have thousands of digits.
 
 import math
 import itertools
+from collections import Counter
 from fractions import Fraction
 
+LETTERS = "ABCDEFGH"
 
-def is_strict_int(val):
-    """Validates that a value is an integer and strictly not a boolean."""
-    return isinstance(val, int) and not isinstance(val, bool)
+
+def check_int(*values):
+    # bool is a subclass of int in Python (True == 1), so it has to be rejected explicitly.
+    for v in values:
+        if not isinstance(v, int) or isinstance(v, bool):
+            raise TypeError("Inputs must be integers.")
+
+
+def check_non_negative(*values):
+    check_int(*values)
+    if any(v < 0 for v in values):
+        raise ValueError("Inputs must be non-negative.")
+
+
+def check_n_r(n, r):
+    check_non_negative(n, r)
+    if r > n:
+        raise ValueError("r cannot be greater than n.")
 
 
 def factorial(n):
-    """Computes n! = n * (n - 1) * ... * 1 using an iterative loop.
-    
-    0! is defined as 1.
-    Negative numbers are rejected.
-    The result is cross-checked against math.factorial.
-    """
-    if not is_strict_int(n):
-        raise TypeError("Factorial argument must be an integer.")
-    if n < 0:
-        raise ValueError("Factorial is only defined for non-negative integers.")
-    
-    result = 1
-    for i in range(1, n + 1):
-        result = result * i
-    
-    # Cross-check with standard math library
-    check = math.factorial(n)
-    if result != check:
-        raise RuntimeError("Internal math cross-check failed for factorial(" + str(n) + ")")
-    
-    return result
+    check_non_negative(n)
+    return math.factorial(n)
 
 
 def permutations(n, r):
-    """Computes P(n, r) = n! / (n - r)! using exact integer arithmetic.
-    
-    Requires integers n >= 0 and 0 <= r <= n.
-    Order matters in permutations.
-    """
-    if not is_strict_int(n) or not is_strict_int(r):
-        raise TypeError("n and r must both be integers.")
-    if n < 0:
-        raise ValueError("n must be non-negative (n >= 0).")
-    if r < 0:
-        raise ValueError("r must be non-negative (r >= 0).")
-    if r > n:
-        raise ValueError("r cannot be greater than n (r <= n required).")
-    
-    numerator = factorial(n)
-    denominator = factorial(n - r)
-    result = numerator // denominator
-    
-    # Cross-check with math.perm
-    check = math.perm(n, r)
-    if result != check:
-        raise RuntimeError("Internal math cross-check failed for permutations(" + str(n) + ", " + str(r) + ")")
-    
-    return result
+    check_n_r(n, r)
+    return math.perm(n, r)
 
 
 def combinations(n, r):
-    """Computes C(n, r) = n! / (r! * (n - r)!) using exact integer division.
-    
-    Requires integers n >= 0 and 0 <= r <= n.
-    Order does not matter in combinations.
-    """
-    if not is_strict_int(n) or not is_strict_int(r):
-        raise TypeError("n and r must both be integers.")
-    if n < 0:
-        raise ValueError("n must be non-negative (n >= 0).")
-    if r < 0:
-        raise ValueError("r must be non-negative (r >= 0).")
-    if r > n:
-        raise ValueError("r cannot be greater than n (r <= n required).")
-    
-    numerator = factorial(n)
-    denominator = factorial(r) * factorial(n - r)
-    result = numerator // denominator
-    
-    # Cross-check with math.comb
-    check = math.comb(n, r)
-    if result != check:
-        raise RuntimeError("Internal math cross-check failed for combinations(" + str(n) + ", " + str(r) + ")")
-    
-    return result
+    check_n_r(n, r)
+    return math.comb(n, r)
 
 
 def permutations_with_repetition(n, r):
-    """Computes permutations with replacement: n^r.
-    
-    Each of the r positions can be chosen independently from n choices.
-    Requires n >= 0 and r >= 0. Note that r > n is permissible.
-    Convention 0^0 = 1 (the single empty sequence).
-    """
-    if not is_strict_int(n) or not is_strict_int(r):
-        raise TypeError("n and r must both be integers.")
-    if n < 0 or r < 0:
-        raise ValueError("n and r must be non-negative.")
-    
-    if n == 0 and r == 0:
-        return 1
-    if n == 0 and r > 0:
-        return 0
-    
+    check_non_negative(n, r)
+    # Python defines 0 ** 0 == 1, which matches the single empty sequence.
     return n ** r
 
 
 def combinations_with_repetition(n, r):
-    """Computes combinations with replacement (multichoose): C(n + r - 1, r).
-    
-    Also known as stars-and-bars distribution of r identical items into n distinct bins.
-    For n = 0: returns 1 if r = 0, otherwise 0.
-    For r = 0: returns 1 for any n >= 0.
-    """
-    if not is_strict_int(n) or not is_strict_int(r):
-        raise TypeError("n and r must both be integers.")
-    if n < 0 or r < 0:
-        raise ValueError("n and r must be non-negative.")
-    
+    # Stars and bars: r identical stars and n - 1 bars (dividers between n types)
+    # fill n + r - 1 positions, so the answer is C(n + r - 1, r).
+    # With n = 0 types, only the empty selection (r = 0) is possible.
+    check_non_negative(n, r)
     if n == 0:
-        if r == 0:
-            return 1
-        return 0
-    if r == 0:
-        return 1
-    
-    return combinations(n + r - 1, r)
+        return 1 if r == 0 else 0
+    return math.comb(n + r - 1, r)
+
+
+def multinomial_coefficient(counts):
+    # n! / (k1! * k2! * ... * km!) where n = k1 + k2 + ... + km.
+    counts = list(counts)
+    if not counts:
+        raise ValueError("counts cannot be empty.")
+    check_non_negative(*counts)
+    result = math.factorial(sum(counts))
+    for c in counts:
+        result //= math.factorial(c)
+    return result
 
 
 def multiset_arrangements_count(text):
-    """Computes the number of distinct permutations of a multiset string.
-    
-    Formula: n! / (n1! * n2! * ... * nk!)
-    Frequencies of characters are stored in a dictionary.
-    Returns a tuple: (total_arrangements, frequency_dictionary).
-    """
     if not isinstance(text, str):
         raise TypeError("Input must be a string.")
-    
-    length = len(text)
-    if length == 0:
-        return (1, {})
-    
-    # Count frequencies using a dictionary
-    freq = {}
-    for ch in text:
-        if ch in freq:
-            freq[ch] = freq[ch] + 1
-        else:
-            freq[ch] = 1
-    
-    numerator = factorial(length)
-    denominator = 1
-    for char_key in freq:
-        count = freq[char_key]
-        denominator = denominator * factorial(count)
-    
-    total = numerator // denominator
-    return (total, freq)
+    # Distinct arrangements of a word = multinomial of its letter counts,
+    # e.g. MISSISSIPPI -> 11! / (1! * 4! * 4! * 2!) = 34650.
+    freq = dict(Counter(text))
+    if not freq:
+        return 1, freq
+    return multinomial_coefficient(freq.values()), freq
 
 
 def verify_binomial_identities(n, r):
-    """Verifies core binomial coefficient identities for chosen n and r.
-    
-    1. Symmetry: C(n, r) = C(n, n - r)
-    2. Pascal's Identity: C(n, r) = C(n - 1, r - 1) + C(n - 1, r)
-       (Valid when n >= 1 and 1 <= r <= n - 1)
-    3. Row Sum Identity: Sum_{k=0}^{n} C(n, k) = 2^n
-    
-    Returns a dictionary of verification reports.
-    """
-    if not is_strict_int(n) or not is_strict_int(r):
-        raise TypeError("n and r must both be integers.")
-    if n < 0 or r < 0 or r > n:
-        raise ValueError("Requires 0 <= r <= n.")
-    
-    c_nr = combinations(n, r)
-    
-    # 1. Symmetry check
-    c_sym = combinations(n, n - r)
-    sym_verified = (c_nr == c_sym)
-    
-    # 2. Pascal's identity check
-    if n >= 1 and 1 <= r <= (n - 1):
-        pascal_sum = combinations(n - 1, r - 1) + combinations(n - 1, r)
-        pascal_verified = (c_nr == pascal_sum)
-        pascal_applicable = True
-        pascal_note = "C(" + str(n-1) + "," + str(r-1) + ") + C(" + str(n-1) + "," + str(r) + ") = " + str(pascal_sum)
+    check_n_r(n, r)
+    c_nr = math.comb(n, r)
+    c_sym = math.comb(n, n - r)
+    # Pascal's rule C(n, r) = C(n-1, r-1) + C(n-1, r) only applies to interior entries;
+    # at r = 0 or r = n one of the two terms would not exist. pascal_verified is None then.
+    pascal_applicable = 1 <= r <= n - 1
+    if pascal_applicable:
+        pascal_sum = math.comb(n - 1, r - 1) + math.comb(n - 1, r)
+        pascal_note = f"C({n - 1},{r - 1}) + C({n - 1},{r}) = {pascal_sum}"
     else:
-        pascal_verified = None
-        pascal_applicable = False
-        pascal_note = "Pascal's identity applies to interior elements where n >= 1 and 1 <= r <= n - 1."
-    
-    # 3. Row sum check
-    computed_row_sum = 0
-    for k in range(n + 1):
-        computed_row_sum = computed_row_sum + combinations(n, k)
-    theoretical_pow2 = 2 ** n
-    row_sum_verified = (computed_row_sum == theoretical_pow2)
-    
-    report = {
+        pascal_sum = None
+        pascal_note = "Pascal's identity applies to interior elements where 1 <= r <= n - 1."
+    row_sum = sum(math.comb(n, k) for k in range(n + 1))
+    return {
         "n": n,
         "r": r,
         "c_nr": c_nr,
-        "symmetry_verified": sym_verified,
         "c_sym": c_sym,
+        "symmetry_verified": c_nr == c_sym,
         "pascal_applicable": pascal_applicable,
-        "pascal_verified": pascal_verified,
+        "pascal_verified": (pascal_sum == c_nr) if pascal_applicable else None,
         "pascal_note": pascal_note,
-        "row_sum_verified": row_sum_verified,
-        "row_sum_value": computed_row_sum,
-        "power_of_two": theoretical_pow2
+        "row_sum_value": row_sum,
+        "power_of_two": 2 ** n,
+        "row_sum_verified": row_sum == 2 ** n,
     }
-    return report
 
 
 def generate_pascal_triangle(num_rows):
-    """Generates Pascal's triangle from row 0 to row (num_rows - 1).
-    
-    Each row is constructed iteratively from the preceding row using recurrence.pascal_next_row.
-    Every generated element is cross-verified against combinations(row_idx, col_idx).
-    """
-    if not is_strict_int(num_rows):
-        raise TypeError("Number of rows must be an integer.")
-    if num_rows < 1 or num_rows > 15:
-        raise ValueError("Number of rows must be between 1 and 15.")
-    
-    import recurrence
-    triangle = []
-    for i in range(num_rows):
-        if i == 0:
-            current_row = [1]
-        else:
-            current_row = recurrence.pascal_next_row(triangle[i - 1])
-        
-        # Verify every entry against combinations formula C(i, j)
-        for col_idx in range(len(current_row)):
-            expected = combinations(i, col_idx)
-            if current_row[col_idx] != expected:
-                raise RuntimeError("Pascal entry mismatch at row " + str(i) + ", col " + str(col_idx))
-        
-        triangle.append(current_row)
-    
+    check_int(num_rows)
+    if num_rows < 1:
+        raise ValueError("Number of rows must be at least 1.")
+    # Each new row is 1, then the sums of neighbouring pairs in the row above, then 1.
+    triangle = [[1]]
+    for _ in range(num_rows - 1):
+        prev = triangle[-1]
+        triangle.append([1] + [a + b for a, b in zip(prev, prev[1:])] + [1])
     return triangle
 
 
 def binomial_expansion_terms(n, a, b):
-    """Computes terms of (a*x + b*y)^n using binomial theorem.
-    
-    Formula: (a*x + b*y)^n = Sum_{k=0}^{n} C(n, k) * (a*x)^(n - k) * (b*y)^k
-    Each term is represented as a tuple: (coefficient, x_power, y_power).
-    """
-    if not is_strict_int(n) or not is_strict_int(a) or not is_strict_int(b):
-        raise TypeError("n, a, and b must be integers.")
-    if n < 0 or n > 20:
-        raise ValueError("Exponent n must be between 0 and 20.")
-    if abs(a) > 10 or abs(b) > 10:
-        raise ValueError("Coefficients a and b must have absolute value <= 10.")
-    
-    terms = []
-    for k in range(n + 1):
-        comb_val = combinations(n, k)
-        a_factor = a ** (n - k)
-        b_factor = b ** k
-        coeff = comb_val * a_factor * b_factor
-        x_power = n - k
-        y_power = k
-        terms.append((coeff, x_power, y_power))
-    
-    return terms
+    check_int(n, a, b)
+    if n < 0:
+        raise ValueError("Exponent n must be non-negative.")
+    # Binomial theorem: (a*x + b*y)^n = sum over k of C(n, k) * a^(n-k) * b^k * x^(n-k) * y^k.
+    # Each term is returned as (coefficient, power of x, power of y).
+    return [(math.comb(n, k) * a ** (n - k) * b ** k, n - k, k) for k in range(n + 1)]
 
 
-def format_single_term(coeff, x_pow, y_pow, is_first):
-    """Formats one term of a polynomial expansion into plain ASCII text."""
-    if coeff == 0:
-        return ""
-    
-    sign_str = ""
-    abs_coeff = abs(coeff)
-    
-    if is_first:
-        if coeff < 0:
-            sign_str = "-"
-    else:
-        if coeff < 0:
-            sign_str = " - "
-        else:
-            sign_str = " + "
-    
-    var_parts = []
-    if x_pow > 0:
-        if x_pow == 1:
-            var_parts.append("x")
-        else:
-            var_parts.append("x^" + str(x_pow))
-    
-    if y_pow > 0:
-        if y_pow == 1:
-            var_parts.append("y")
-        else:
-            var_parts.append("y^" + str(y_pow))
-    
-    var_str = "*".join(var_parts)
-    
-    if len(var_parts) == 0:
-        term_text = str(abs_coeff)
-    else:
-        if abs_coeff == 1:
-            term_text = var_str
-        else:
-            term_text = str(abs_coeff) + "*" + var_str
-    
-    return sign_str + term_text
+def term_variables(x_pow, y_pow):
+    # (2, 1) -> "x^2*y". Returns "" for the constant term (both powers 0).
+    parts = [v if p == 1 else f"{v}^{p}" for v, p in (("x", x_pow), ("y", y_pow)) if p > 0]
+    return "*".join(parts)
 
 
 def format_binomial_expansion(terms):
-    """Formats a list of (coeff, x_pow, y_pow) tuples into a full ASCII polynomial."""
-    if not terms:
-        return "0"
-    
-    rendered_parts = []
-    is_first = True
+    # Builds text like "4*x^2 - 12*x*y + 9*y^2": zero terms are skipped,
+    # a coefficient of 1 is hidden, and only the first term gets a bare "-" sign.
+    parts = []
     for coeff, x_pow, y_pow in terms:
         if coeff == 0:
             continue
-        rendered_term = format_single_term(coeff, x_pow, y_pow, is_first)
-        if rendered_term != "":
-            rendered_parts.append(rendered_term)
-            is_first = False
-    
-    if len(rendered_parts) == 0:
-        return "0"
-    
-    return "".join(rendered_parts)
+        variables = term_variables(x_pow, y_pow)
+        size = abs(coeff)
+        if not variables:
+            body = str(size)
+        elif size == 1:
+            body = variables
+        else:
+            body = f"{size}*{variables}"
+        if parts:
+            sign = " - " if coeff < 0 else " + "
+        else:
+            sign = "-" if coeff < 0 else ""
+        parts.append(sign + body)
+    return "".join(parts) or "0"
+
+
+def binomial_label(n, a, b):
+    # Reuses the formatter on the two input terms, so a=2, b=-3 prints "(2*x - 3*y)^n".
+    return f"({format_binomial_expansion([(a, 1, 0), (b, 0, 1)])})^{n}"
+
+
+def _list_letters(generator, expected, n, r):
+    # Lists every arrangement of the first n letters, then confirms that the list length,
+    # the number of unique items and the formula all agree.
+    # Limited to 8 letters because the list grows factorially (8! = 40,320 items).
+    check_n_r(n, r)
+    if n > len(LETTERS):
+        raise ValueError(f"Listing is limited to n <= {len(LETTERS)}.")
+    items = list(generator(LETTERS[:n], r))
+    return items, expected(n, r), len(items) == len(set(items)) == expected(n, r)
 
 
 def list_letter_permutations(n, r):
-    """Lists permutations of the first n uppercase letters taken r at a time.
-    
-    Arrangements are stored as tuples.
-    A set of tuples is used to verify uniqueness.
-    Returns (list_of_tuples, theoretical_count, is_match).
-    """
-    if not is_strict_int(n) or not is_strict_int(r):
-        raise TypeError("n and r must both be integers.")
-    if n < 0 or r < 0 or r > n or n > 8:
-        raise ValueError("n must be between 0 and 8, and 0 <= r <= n.")
-    
-    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    items = list(alphabet[:n])
-    
-    raw_perms = itertools.permutations(items, r)
-    tuple_list = []
-    unique_set = set()
-    
-    for p in raw_perms:
-        tup = tuple(p)
-        tuple_list.append(tup)
-        unique_set.add(tup)
-    
-    theoretical = permutations(n, r)
-    is_match = (len(tuple_list) == theoretical) and (len(unique_set) == theoretical)
-    
-    return (tuple_list, theoretical, is_match)
+    return _list_letters(itertools.permutations, permutations, n, r)
 
 
 def list_letter_combinations(n, r):
-    """Lists combinations of the first n uppercase letters taken r at a time.
-    
-    Groups are stored as tuples.
-    A set of tuples is used to verify uniqueness.
-    Returns (list_of_tuples, theoretical_count, is_match).
-    """
-    if not is_strict_int(n) or not is_strict_int(r):
-        raise TypeError("n and r must both be integers.")
-    if n < 0 or r < 0 or r > n or n > 8:
-        raise ValueError("n must be between 0 and 8, and 0 <= r <= n.")
-    
-    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    items = list(alphabet[:n])
-    
-    raw_combs = itertools.combinations(items, r)
-    tuple_list = []
-    unique_set = set()
-    
-    for c in raw_combs:
-        tup = tuple(c)
-        tuple_list.append(tup)
-        unique_set.add(tup)
-    
-    theoretical = combinations(n, r)
-    is_match = (len(tuple_list) == theoretical) and (len(unique_set) == theoretical)
-    
-    return (tuple_list, theoretical, is_match)
+    return _list_letters(itertools.combinations, combinations, n, r)
 
 
 def list_multiset_permutations(text):
-    """Lists all distinct permutations of a multiset string.
-    
-    Uses itertools.permutations, stores arrangements as tuples,
-    and inserts them into a set to eliminate duplicate permutations.
-    Returns (distinct_list, theoretical_count, is_match).
-    """
     if not isinstance(text, str):
         raise TypeError("Input must be a string.")
     if len(text) > 8:
-        raise ValueError("Listing is capped at 8 characters for performance.")
-    
-    items = list(text)
-    raw_perms = itertools.permutations(items)
-    
-    unique_set = set()
-    for p in raw_perms:
-        unique_set.add(tuple(p))
-    
-    distinct_list = sorted(list(unique_set))
-    theoretical, _ = multiset_arrangements_count(text)
-    is_match = (len(distinct_list) == theoretical)
-    
-    return (distinct_list, theoretical, is_match)
+        raise ValueError("Listing is limited to 8 characters.")
+    # itertools treats repeated letters as different items, so a set removes the duplicates.
+    items = sorted(set(itertools.permutations(text)))
+    expected, _ = multiset_arrangements_count(text)
+    return items, expected, len(items) == expected
+
+
+def derangements_list(n):
+    # A derangement is a permutation where no item stays in its original position.
+    # Returns [D(0), ..., D(n)] using D(n) = (n - 1) * (D(n-1) + D(n-2)), D(0) = 1, D(1) = 0.
+    # The final slice handles n = 0, because the list always starts with two values.
+    check_non_negative(n)
+    values = [1, 0]
+    for i in range(2, n + 1):
+        values.append((i - 1) * (values[-1] + values[-2]))
+    return values[:n + 1]
 
 
 def derangements(n):
-    """Computes the number of derangements D(n) (permutations with zero fixed points).
-    
-    Recurrence: D(0) = 1, D(1) = 0, D(n) = (n - 1) * (D(n - 1) + D(n - 2)) for n >= 2.
-    Boundary cases: D(0) = 1 (empty set has 1 derangement), D(1) = 0.
-    """
-    if not is_strict_int(n):
-        raise TypeError("n must be an integer.")
-    if n < 0 or n > 1000:
-        raise ValueError("n must satisfy 0 <= n <= 1000.")
-    
-    if n == 0:
-        return 1
-    if n == 1:
-        return 0
-    
-    d_prev2 = 1  # D(0)
-    d_prev1 = 0  # D(1)
-    d_curr = 0
-    for i in range(2, n + 1):
-        d_curr = (i - 1) * (d_prev1 + d_prev2)
-        d_prev2 = d_prev1
-        d_prev1 = d_curr
-    
-    return d_curr
-
-
-def derangements_inclusion_exclusion(n):
-    """Computes D(n) using the Principle of Inclusion-Exclusion (PIE).
-    
-    Formula: D(n) = n! * Sum_{k=0}^{n} ((-1)^k / k!) = Sum_{k=0}^{n} (-1)^k * (n! / k!)
-    Cross-checks the recurrence formulation for mathematical consistency.
-    """
-    if not is_strict_int(n):
-        raise TypeError("n must be an integer.")
-    if n < 0 or n > 1000:
-        raise ValueError("n must satisfy 0 <= n <= 1000.")
-    
-    total = 0
-    fact_n = factorial(n)
-    for k in range(n + 1):
-        sign = 1 if k % 2 == 0 else -1
-        term = fact_n // factorial(k)
-        total = total + (sign * term)
-    
-    return total
+    return derangements_list(n)[-1]
 
 
 def derangements_report(n):
-    """Generates a complete educational report for derangements D(n).
-    
-    Includes recurrence steps, inclusion-exclusion verification, and
-    asymptotic convergence to n! / e.
-    """
-    if not is_strict_int(n):
-        raise TypeError("n must be an integer.")
-    if n < 0 or n > 1000:
-        raise ValueError("n must satisfy 0 <= n <= 1000.")
-    
     count = derangements(n)
-    fact_n = factorial(n)
-    # Fraction keeps the division exact; converting D(n) and n! to float
-    # separately overflows for n > 170.
-    ratio = float(Fraction(count, fact_n)) if fact_n > 0 else 1.0
-    inv_e = 1.0 / math.e
-    
+    fact = math.factorial(n)
+    # D(n) and n! are too large for float when n > 170, so divide exactly with Fraction
+    # first and only convert the small result (about 1/e) to float.
+    ratio = float(Fraction(count, fact))
     return {
-        "n": n,
         "derangements": count,
-        "factorial": fact_n,
+        "factorial": fact,
         "ratio": ratio,
-        "ratio_approx_1_over_e": inv_e,
-        "difference_from_1_over_e": abs(ratio - inv_e),
-        "recurrence_formula": "D(n) = (n - 1) * [D(n - 1) + D(n - 2)]",
-        "inclusion_exclusion_formula": "D(n) = n! * Sum_{k=0}^{n} [(-1)^k / k!]"
+        "limit": 1 / math.e,
+        "difference": abs(ratio - 1 / math.e),
     }
 
 
 def circular_permutations(n, r=None, allow_reflections=False):
-    """Computes exact circular permutations (int) where rotational shifts are equivalent.
-    
-    For arranging all n objects in a circle:
-      - Distinct orderings (rotations identical, reflections distinct): (n - 1)! for n >= 1 (1 if n == 0).
-      - Reversible / keyrings / necklaces (reflections identical): (n - 1)! // 2 for n >= 3 (1 for n <= 2).
-      
-    For choosing and arranging r objects out of n in a circle:
-      - P_circ(n, r) = P(n, r) // r for 1 <= r <= n.
-      - With reflections: (P(n, r) // r) // 2 for r >= 3.
-    """
-    if not is_strict_int(n):
-        raise TypeError("n must be an integer.")
-    if n < 0 or n > 1000:
-        raise ValueError("n must satisfy 0 <= n <= 1000.")
+    if r is None:
+        r = n
+    check_n_r(n, r)
     if not isinstance(allow_reflections, bool):
         raise TypeError("allow_reflections must be a boolean.")
-        
-    actual_r = n if (r is None) else r
-    if not is_strict_int(actual_r):
-        raise TypeError("r must be an integer.")
-    if actual_r < 0 or actual_r > n:
-        raise ValueError("r must satisfy 0 <= r <= n.")
-    
-    if actual_r == 0:
+    if r == 0:
         return 1
-    if actual_r == 1:
-        return 1
-        
-    if actual_r == n:
-        base = factorial(n - 1)
-        if allow_reflections and n >= 3:
-            return base // 2
-        return base
-        
-    p_nr = permutations(n, actual_r)
-    base = p_nr // actual_r
-    if allow_reflections and actual_r >= 3:
-        return base // 2
-    return base
-
-
-def circular_permutations_report(n, r=None, allow_reflections=False):
-    """Returns a structured dictionary detailing circular permutations calculation."""
-    actual_r = n if (r is None) else r
-    count = circular_permutations(n, r=r, allow_reflections=allow_reflections)
-    
-    if actual_r <= 1:
-        expl = f"Trivial circle of {actual_r} items: exactly 1 arrangement."
-    elif actual_r == n:
-        if allow_reflections and n >= 3:
-            expl = f"Reversible circle: (n - 1)! / 2 = ({n} - 1)! / 2 = {count}."
-        else:
-            expl = f"Directed circle: (n - 1)! = ({n} - 1)! = {count}."
-    else:
-        if allow_reflections and actual_r >= 3:
-            expl = f"P_circ({n}, {actual_r}) = P({n}, {actual_r}) / ({actual_r} * 2) = {count}."
-        else:
-            expl = f"P_circ({n}, {actual_r}) = P({n}, {actual_r}) / {actual_r} = {count}."
-            
-    return {
-        "n": n,
-        "r": actual_r,
-        "count": count,
-        "allow_reflections": bool(allow_reflections),
-        "explanation": expl
-    }
-
-
-def multinomial_coefficient(counts_list):
-    """Computes the multinomial coefficient for a list of partition counts.
-    
-    Formula: M(n; k1, k2, ..., km) = n! / (k1! * k2! * ... * km!) where n = Sum(ki).
-    Generalizes binomial coefficients and multiset permutations. Returns integer count.
-    """
-    if not isinstance(counts_list, (list, tuple)):
-        raise TypeError("counts_list must be a list or tuple of integers.")
-    if len(counts_list) == 0:
-        raise ValueError("counts_list cannot be empty.")
-    
-    total_n = 0
-    denom = 1
-    for c in counts_list:
-        if not is_strict_int(c):
-            raise TypeError("All partition counts must be integers.")
-        if c < 0:
-            raise ValueError("All partition counts must be non-negative.")
-        total_n += c
-        denom = denom * factorial(c)
-    
-    return factorial(total_n) // denom
+    # Rotating a circle of r items gives r copies of the same arrangement, so divide by r.
+    # If mirror images also count as the same (necklaces), halve it again, but only for
+    # r >= 3: with 1 or 2 items the mirror image is already the same arrangement.
+    count = math.perm(n, r) // r
+    if allow_reflections and r >= 3:
+        count //= 2
+    return count
